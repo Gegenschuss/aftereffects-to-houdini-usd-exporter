@@ -70,7 +70,7 @@
     }
 
     // ── Dialog ────────────────────────────────────────────────────────────
-    var BUILD_DATE = "260427f";  // bump on each meaningful change (YYMMDD)
+    var BUILD_DATE = "260427g";  // bump on each meaningful change (YYMMDD)
     var dlg = new Window("dialog", "AE \u2192 Houdini USD Exporter  " + BUILD_DATE);
     dlg.orientation = "column";
     dlg.alignChildren = ["fill", "top"];
@@ -400,19 +400,26 @@
 
             // Rotation matrix in AE space.
             //
-            // For a 2-node camera with auto-orient, AE's renderer aims the
-            // camera at pointOfInterest, AND keeps the layer's Orientation
-            // property live-updated to that lookAt-equivalent.  So reading
-            // Orientation already gives us AE's rendered rotation — no need
-            // to compose with our own lookAt(pos, POI).  Composing them
-            // double-counts and produces a rotation error that is invisible
-            // at frame 0 (everything is identity) but compounds as the
-            // animation progresses (visible drift at the end of the move).
+            // 2-node cameras: lookAt(pos, POI) × aeRotMatrix(ori, xr, yr, zr).
+            // This is the empirically-best composition we have — close to AE
+            // preview at the start of an animation, with a small residual
+            // drift at the end (~few degrees) that hasn't been root-caused
+            // yet.  Using either factor alone is worse:
+            //   - lookAt only: wrong direction (POI semantics aren't simply
+            //     "where to look" once AE has applied auto-orient bookkeeping)
+            //   - aeRotMatrix only: significantly wrong on animated 2-nodes
             //
-            // Treat 1-node and 2-node identically: use Orientation + X/Y/Z
-            // Rotation directly.  pointOfInterest is no longer read.
+            // 1-node cameras / nulls: aeRotMatrix only.
             var rp = readRot(layer, t);
-            var Rae = aeRotMatrix(rp.ori, rp.xr, rp.yr, rp.zr);
+            var Rae;
+            if (nfo.use2Node) {
+                var poi = [rawPos[0], rawPos[1], rawPos[2]];
+                try { poi = layer.pointOfInterest.valueAtTime(t, false); } catch(e) {}
+                Rae = m3mul(lookAtMatrix(rawPos, poi),
+                            aeRotMatrix(rp.ori, rp.xr, rp.yr, rp.zr));
+            } else {
+                Rae = aeRotMatrix(rp.ori, rp.xr, rp.yr, rp.zr);
+            }
 
             // Convert AE (column-vector, left-handed Y-down) → USD
             // (row-vector, right-handed Y-up).  Identity AE → identity USD
