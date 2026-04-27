@@ -1,6 +1,6 @@
 # AE → Houdini USD Exporter
 
-> ⚠️ **Still in development.** Translation, hierarchy, lights and 1-node cameras are working well; 2-node camera rotation is being actively iterated. Use at your own risk and verify against AE preview.
+> 🚧 Early release — verified against AE preview for cameras (1-node and 2-node, animated and static), nulls, hierarchy and translations. Lights and 3D AVLayer anchor handling are not yet exhaustively tested. Open an issue if you hit something off.
 
 ExtendScript that exports an After Effects composition's 3D layers (cameras, lights, nulls, 3D AVLayers) to a USD ASCII file ready for import into Houdini.
 
@@ -74,10 +74,10 @@ Matches AE's render-time visibility:
 
 ## Known limitations
 
-- 2-node camera rotation is being iterated; verify against AE preview before trusting it for production.
 - Layers parented to a non-exported layer (e.g. parented to a 2D layer) become roots with a parent-relative transform — world position will be wrong in that case.
 - Anchor points on 3D AVLayers are not yet handled — rotation/scale pivot will be at the prim origin, not the AE anchor.
 - Camera focal length math assumes AE's default 36 mm horizontal film. If you change Film Size in AE camera settings, edit `FILM_WIDTH_MM` at the top of the script.
+- Lights export the AE light type and intensity/colour/cone params but haven't been visually verified across all four light types.
 
 ## Convention sources
 
