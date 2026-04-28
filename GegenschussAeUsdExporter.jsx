@@ -70,7 +70,7 @@
     }
 
     // ── Dialog ────────────────────────────────────────────────────────────
-    var BUILD_DATE = "260428e";  // bump on each meaningful change (YYMMDD)
+    var BUILD_DATE = "260428f";  // bump on each meaningful change (YYMMDD)
     var dlg = new Window("dialog", "AE \u2192 Houdini USD  " + BUILD_DATE);
     dlg.orientation = "column";
     dlg.alignChildren = ["fill", "top"];
@@ -627,6 +627,12 @@
         if (nfo.isLight) {
             writeScalar(out, ind2, 'float',   'inputs:intensity', nfo.intS);
             writeTuple3(out, ind2, 'color3f', 'inputs:color',     nfo.colS);
+            // Normalise: decouples intensity from light shape/size so
+            // treatAsPoint sphere lights don't get nuked by zero surface
+            // area, and intensity values translate predictably across
+            // renderers.  Karma in particular needs this on for the
+            // intensity scaling we set in samplePhase to read sensibly.
+            out.push(ind2 + 'bool inputs:normalize = 1');
             if (nfo.usdType === 'SphereLight') {
                 out.push(ind2 + 'float inputs:radius = 0');
                 out.push(ind2 + 'bool inputs:treatAsPoint = 1');
