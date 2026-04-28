@@ -70,7 +70,7 @@
     }
 
     // ── Dialog ────────────────────────────────────────────────────────────
-    var BUILD_DATE = "260428m";  // bump on each meaningful change (YYMMDD)
+    var BUILD_DATE = "260428n";  // bump on each meaningful change (YYMMDD)
     var dlg = new Window("dialog", "AE \u2192 Houdini USD  " + BUILD_DATE);
     dlg.orientation = "column";
     dlg.alignChildren = ["fill", "top"];
@@ -122,6 +122,10 @@
     var chkAll = dlg.add("checkbox", undefined, "Export all 3D layers");
     chkAll.value = (loadPref("exportAll", "1") === "1");
 
+    var chkVisible = dlg.add("checkbox", undefined,
+        "Visible layers only  (off = include eyeball-off / non-solo'd)");
+    chkVisible.value = (loadPref("visibleOnly", "1") === "1");
+
     var chkCenter = dlg.add("checkbox", undefined, "Centre comp at world origin");
     chkCenter.value = (loadPref("centerOffset", "1") === "1");
 
@@ -151,14 +155,16 @@
     var clipNear     = parseFloat(nearInput.text)  || 0.1;
     var clipFar      = parseFloat(farInput.text)   || 100000;
     var centerOffset = chkCenter.value;
+    var visibleOnly  = chkVisible.value;
 
     // Persist for next run.
     savePref("scale",        scaleInput.text);
     savePref("clipNear",     nearInput.text);
     savePref("clipFar",      farInput.text);
     savePref("frameRange",   rbSingle.value ? "single" : (rbFull.value ? "full" : "work"));
-    savePref("exportAll",    chkAll.value    ? "1" : "0");
-    savePref("centerOffset", chkCenter.value ? "1" : "0");
+    savePref("exportAll",    chkAll.value     ? "1" : "0");
+    savePref("visibleOnly",  chkVisible.value ? "1" : "0");
+    savePref("centerOffset", chkCenter.value  ? "1" : "0");
 
     // ── Frame range ───────────────────────────────────────────────────────
     var fps = comp.frameRate;
@@ -202,9 +208,9 @@
         var isAV3D  = (lyr instanceof AVLayer) && lyr.threeDLayer;
 
         if (!isCam && !isLight && !isAV3D) continue;
-        if (!lyr.enabled)                   continue;  // eyeball off
-        if (anySolo && !lyr.solo)           continue;  // solo'd elsewhere → invisible
-        if (!chkAll.value && !lyr.selected)  continue;
+        if (visibleOnly && !lyr.enabled)             continue;  // eyeball off
+        if (visibleOnly && anySolo && !lyr.solo)     continue;  // solo'd elsewhere
+        if (!chkAll.value && !lyr.selected)           continue;
 
         var lt        = isLight ? lyr.lightType : null;
         var isSpot    = isLight && (lt === LightType.SPOT);
