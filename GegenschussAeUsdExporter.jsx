@@ -70,12 +70,14 @@
     }
 
     // ── Dialog ────────────────────────────────────────────────────────────
-    var BUILD_DATE = "260428g";  // bump on each meaningful change (YYMMDD)
+    var BUILD_DATE = "260428h";  // bump on each meaningful change (YYMMDD)
     var dlg = new Window("dialog", "AE \u2192 Houdini USD  " + BUILD_DATE);
     dlg.orientation = "column";
     dlg.alignChildren = ["fill", "top"];
     dlg.spacing = 6;
     dlg.margins = 14;
+
+    dlg.add("statictext", undefined, "Optimised for Houdini Solaris / Karma.");
 
     // Scale + Clip near/far on one row
     var grpRow1 = dlg.add("group");
