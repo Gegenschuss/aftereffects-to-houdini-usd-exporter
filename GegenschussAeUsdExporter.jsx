@@ -70,14 +70,29 @@
     }
 
     // ── Dialog ────────────────────────────────────────────────────────────
-    var BUILD_DATE = "260428h";  // bump on each meaningful change (YYMMDD)
+    var BUILD_DATE = "260428i";  // bump on each meaningful change (YYMMDD)
     var dlg = new Window("dialog", "AE \u2192 Houdini USD  " + BUILD_DATE);
     dlg.orientation = "column";
     dlg.alignChildren = ["fill", "top"];
     dlg.spacing = 6;
     dlg.margins = 14;
 
-    dlg.add("statictext", undefined, "Optimised for Houdini Solaris / Karma.");
+    // Comp summary — so the user knows what they're about to export.
+    var nCams = 0, nLights = 0, nXforms = 0;
+    for (var i = 1; i <= comp.numLayers; i++) {
+        var l = comp.layer(i);
+        if (l instanceof CameraLayer) nCams++;
+        else if (l instanceof LightLayer) nLights++;
+        else if ((l instanceof AVLayer) && l.threeDLayer) nXforms++;
+    }
+    var compFps = (Math.round(comp.frameRate * 1000) / 1000);
+    var compFrames = Math.round(comp.duration * comp.frameRate);
+    var compInfo = comp.name + "  ·  " + comp.width + " × " + comp.height +
+                   "  ·  " + compFps + " fps  ·  " + compFrames + " frames";
+    var layerInfo = nCams + " cam  ·  " + nLights + " light  ·  " + nXforms + " xform";
+    dlg.add("statictext", undefined, compInfo);
+    dlg.add("statictext", undefined, layerInfo);
+    dlg.add("panel");   // thin separator
 
     // Scale + Clip near/far on one row
     var grpRow1 = dlg.add("group");
