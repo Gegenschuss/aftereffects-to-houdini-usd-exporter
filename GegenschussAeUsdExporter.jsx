@@ -70,7 +70,7 @@
     }
 
     // ── Dialog ────────────────────────────────────────────────────────────
-    var BUILD_DATE = "260428d";  // bump on each meaningful change (YYMMDD)
+    var BUILD_DATE = "260428e";  // bump on each meaningful change (YYMMDD)
     var dlg = new Window("dialog", "AE \u2192 Houdini USD  " + BUILD_DATE);
     dlg.orientation = "column";
     dlg.alignChildren = ["fill", "top"];
@@ -193,8 +193,12 @@
         var isSpot    = isLight && (lt === LightType.SPOT);
         var isAmbient = isLight && (lt === LightType.AMBIENT);
         var isSolid   = false;
-        try { isSolid = isAV3D && lyr.source && (lyr.source instanceof SolidSource); }
-        catch (e) {}
+        // AE solids are FootageItems whose mainSource is a SolidSource —
+        // the solid colour and metadata live on the source, not the layer.
+        try {
+            isSolid = isAV3D && lyr.source && lyr.source.mainSource &&
+                      (lyr.source.mainSource instanceof SolidSource);
+        } catch (e) {}
 
         layerInfos.push({
             layer:     lyr,
@@ -256,7 +260,8 @@
         try { if (layer instanceof ShapeLayer) return "Shape"; } catch (e) {}
         try { if (layer instanceof TextLayer)  return "Text";  } catch (e) {}
         try {
-            if (layer.source && layer.source instanceof SolidSource) return "Solid";
+            if (layer.source && layer.source.mainSource &&
+                layer.source.mainSource instanceof SolidSource) return "Solid";
         } catch (e) {}
         return "AVLayer";
     }
@@ -654,9 +659,12 @@
     }
 
     function writeSolidGeo(arr, ind, nfo) {
+        // FootageItem.width/height for dimensions; SolidSource (mainSource)
+        // owns the colour.
         var src = nfo.layer.source;
         var w = src.width, h = src.height;
-        var c = src.color || [0.5, 0.5, 0.5];
+        var c = [0.5, 0.5, 0.5];
+        try { c = src.mainSource.color || c; } catch (e) {}
         var anchor = [w/2, h/2, 0];   // default = centred
         try { anchor = nfo.layer.anchorPoint.value; } catch (e) {}
 
