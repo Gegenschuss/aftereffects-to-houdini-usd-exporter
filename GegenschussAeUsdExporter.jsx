@@ -70,7 +70,7 @@
     }
 
     // ── Dialog ────────────────────────────────────────────────────────────
-    var BUILD_DATE = "260428b";  // bump on each meaningful change (YYMMDD)
+    var BUILD_DATE = "260428c";  // bump on each meaningful change (YYMMDD)
     var dlg = new Window("dialog", "AE \u2192 Houdini USD Exporter  " + BUILD_DATE);
     dlg.orientation = "column";
     dlg.alignChildren = ["fill", "top"];
@@ -193,6 +193,9 @@
         var lt        = isLight ? lyr.lightType : null;
         var isSpot    = isLight && (lt === LightType.SPOT);
         var isAmbient = isLight && (lt === LightType.AMBIENT);
+        var isSolid   = false;
+        try { isSolid = isAV3D && lyr.source && (lyr.source instanceof SolidSource); }
+        catch (e) {}
 
         layerInfos.push({
             layer:     lyr,
@@ -201,6 +204,7 @@
             isAV3D:    isAV3D,
             isSpot:    isSpot,
             isAmbient: isAmbient,
+            isSolid:   isSolid,
             usdType:   resolveUSDType(isCam, isLight, lt),
             subtype:   resolveSubtype(isCam, isLight, lt, lyr),
             primName:  makePrimName(lyr.name, usedPrimNames)
@@ -634,12 +638,53 @@
 
         if (!nfo.isAmbient) writeMat4(out, ind2, nfo.mS);
 
+        // Solid → emit a flat quad Mesh inside the Xform so the layer shows
+        // up as actual geometry in Houdini.  Coordinates are in AE pixels
+        // local to the layer, scaled to USD units and Y-flipped, with the
+        // anchor point treated as the local origin (so rotation pivots
+        // correctly around AE's anchor).  doubleSided so both sides render
+        // — AE solids are flat 2D layers without a defined back face.
+        if (nfo.isSolid) writeSolidGeo(out, ind2, nfo);
+
         for (var ci = 0; ci < nfo.children.length; ci++) {
             out.push('');
             writePrim(nfo.children[ci], ind2);
         }
 
         out.push(ind + '}');
+    }
+
+    function writeSolidGeo(arr, ind, nfo) {
+        var src = nfo.layer.source;
+        var w = src.width, h = src.height;
+        var c = src.color || [0.5, 0.5, 0.5];
+        var anchor = [w/2, h/2, 0];   // default = centred
+        try { anchor = nfo.layer.anchorPoint.value; } catch (e) {}
+
+        // Corners in AE-layer-local pixels (top-left of layer is (0,0,0)),
+        // shifted so anchor sits at origin.
+        var tl = [0 - anchor[0], 0 - anchor[1], 0];
+        var tr = [w - anchor[0], 0 - anchor[1], 0];
+        var br = [w - anchor[0], h - anchor[1], 0];
+        var bl = [0 - anchor[0], h - anchor[1], 0];
+
+        // AE → USD: x stays, Y flips, /scale.  Z is 0 anyway so its sign
+        // flip doesn't matter.  CCW order from +Z (USD camera-facing side):
+        // BL, BR, TR, TL.
+        function toUsd(p) {
+            return '(' + fmt(p[0] / scale) + ', ' + fmt(-p[1] / scale) + ', 0)';
+        }
+        var ind2 = ind + I1;
+        arr.push(ind + 'def Mesh "geo"');
+        arr.push(ind + '{');
+        arr.push(ind2 + 'point3f[] points = [' +
+            toUsd(bl) + ', ' + toUsd(br) + ', ' + toUsd(tr) + ', ' + toUsd(tl) + ']');
+        arr.push(ind2 + 'int[] faceVertexCounts = [4]');
+        arr.push(ind2 + 'int[] faceVertexIndices = [0, 1, 2, 3]');
+        arr.push(ind2 + 'bool doubleSided = 1');
+        arr.push(ind2 + 'color3f[] primvars:displayColor = [(' +
+            fmt(c[0]) + ', ' + fmt(c[1]) + ', ' + fmt(c[2]) + ')]');
+        arr.push(ind + '}');
     }
 
     // True iff every sample's data (indices 1..dim) matches sample[0] within ε.
