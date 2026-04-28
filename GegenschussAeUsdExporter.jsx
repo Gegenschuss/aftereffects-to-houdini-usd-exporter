@@ -70,7 +70,7 @@
     }
 
     // ── Dialog ────────────────────────────────────────────────────────────
-    var BUILD_DATE = "260428a";  // bump on each meaningful change (YYMMDD)
+    var BUILD_DATE = "260428b";  // bump on each meaningful change (YYMMDD)
     var dlg = new Window("dialog", "AE \u2192 Houdini USD Exporter  " + BUILD_DATE);
     dlg.orientation = "column";
     dlg.alignChildren = ["fill", "top"];
@@ -466,8 +466,20 @@
 
             // Light
             if (nfo.isLight) {
-                var inten = layer.lightOption.intensity.valueAtTime(t, false) / 100;
-                var col   = layer.lightOption.color.valueAtTime(t, false);
+                // AE intensity is a percentage (100 = "100%").  USD/Karma
+                // expects physical-ish units: DomeLight ≈ 1, DistantLight ≈ 5,
+                // SphereLight in the 100s+ to overcome inverse-square at
+                // typical scene distances.  Scale per type so AE 100% lands
+                // in the right ballpark for each:
+                var aePct = layer.lightOption.intensity.valueAtTime(t, false);
+                var inten;
+                switch (nfo.usdType) {
+                    case 'DomeLight':    inten = aePct * 0.01; break;  // 100% → 1
+                    case 'DistantLight': inten = aePct * 0.05; break;  // 100% → 5
+                    case 'SphereLight':  inten = aePct * 1.0;  break;  // 100% → 100
+                    default:             inten = aePct * 0.01;
+                }
+                var col = layer.lightOption.color.valueAtTime(t, false);
                 intS.push([frame, inten]);
                 colS.push([frame, col[0], col[1], col[2]]);
                 if (nfo.isSpot) {
