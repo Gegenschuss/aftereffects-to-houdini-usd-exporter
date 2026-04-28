@@ -69,23 +69,8 @@
         catch (e) {}
     }
 
-    // ── Grey theme ────────────────────────────────────────────────────────
-    // ScriptUI dialogs default to OS chrome, which clashes with AE's dark
-    // panel UI.  Recursively paint backgrounds + foregrounds to match.
-    var UI_BG = [0.22, 0.22, 0.22, 1];
-    var UI_FG = [0.85, 0.85, 0.85, 1];
-    function applyGrey(c) {
-        try { c.graphics.backgroundColor = c.graphics.newBrush(
-            c.graphics.BrushType.SOLID_COLOR, UI_BG); } catch (e) {}
-        try { c.graphics.foregroundColor = c.graphics.newPen(
-            c.graphics.PenType.SOLID_COLOR, UI_FG, 1); } catch (e) {}
-        if (c.children) {
-            for (var i = 0; i < c.children.length; i++) applyGrey(c.children[i]);
-        }
-    }
-
     // ── Dialog ────────────────────────────────────────────────────────────
-    var BUILD_DATE = "260428l";  // bump on each meaningful change (YYMMDD)
+    var BUILD_DATE = "260428m";  // bump on each meaningful change (YYMMDD)
     var dlg = new Window("dialog", "AE \u2192 Houdini USD  " + BUILD_DATE);
     dlg.orientation = "column";
     dlg.alignChildren = ["fill", "top"];
@@ -155,7 +140,6 @@
         if (outFile) dlg.close();
     };
 
-    applyGrey(dlg);
     dlg.show();
     if (!outFile) return;
 
@@ -289,9 +273,10 @@
 
         var lb = preDlg.add("listbox", undefined, [],
             { multiselect: false, numberOfColumns: 2,
-              showHeaders: true, columnTitles: ["2D layer", "Used by"] });
-        lb.preferredSize.width = 460;
-        lb.preferredSize.height = Math.min(220, 24 + twoDList.length * 22);
+              showHeaders: true, columnTitles: ["2D layer", "Used by"],
+              columnWidths: [220, 460] });
+        lb.preferredSize.width = 700;
+        lb.preferredSize.height = Math.max(180, Math.min(360, 32 + twoDList.length * 22));
         for (var ti = 0; ti < twoDList.length; ti++) {
             var item = lb.add("item", twoDList[ti].layer.name);
             item.subItems[0].text = twoDList[ti].children.join(", ");
@@ -301,7 +286,7 @@
             "3D switch is off on these layers — transforms won't compose " +
             "through the hierarchy.\nFlip them to 3D and include them in " +
             "the export?", { multiline: true });
-        note.preferredSize.width = 460;
+        note.preferredSize.width = 700;
 
         var btnGrp = preDlg.add("group");
         btnGrp.alignment = "right";
@@ -312,7 +297,6 @@
         btnConvert.onClick = function () { preProceed = true;  preDlg.close(); };
         btnCancel.onClick  = function () { preProceed = false; preDlg.close(); };
 
-        applyGrey(preDlg);
         preDlg.show();
         if (!preProceed) return;
 
@@ -716,7 +700,6 @@
     btnReveal.onClick = function () { try { outFile.parent.execute(); } catch (e) {} };
     btnOpen.onClick   = function () { try { outFile.execute();        } catch (e) {} };
     btnDone.onClick   = function () { doneDlg.close(); };
-    applyGrey(doneDlg);
     doneDlg.show();
 
     // ── USD writer helpers ────────────────────────────────────────────────
