@@ -137,6 +137,14 @@ End-to-end against AE preview:
 - ✅ Camera focal length, aperture, focus distance
 - ✅ Static-value optimisation, dedup of held timeSamples
 - ✅ Visibility filter (eyeball off, solo)
+- ✅ Solid → quad mesh + displayColor
+- ✅ Footage → quad mesh + UsdPreviewSurface (texture, UV reader)
+- ✅ Text/Shape → bounding-box quad + detected fill colour
+- ✅ 2D parent / 2D-selected preflight (interactive convert-to-3D)
+- ✅ Multi-shape preflight (split layers with >1 Vector Group)
+- ✅ Versioned backup (Increment-and-Save / `.aep` copy fallback) before destructive AE ops
+- ✅ UTF-8 file writer (non-ASCII layer names round-trip)
+- ✅ Layer in/out → `visibility.timeSamples`
 
 Not yet visually verified:
 - ⚠️ All four light types (data is exported, framing/falloff in Houdini not confirmed)
@@ -146,3 +154,27 @@ Not yet visually verified:
 - ⚠️ Layer time-stretch / time-remap (script ignores)
 
 When chasing one of these, run the probe trick first if rotation/orientation is involved.
+
+## Pending follow-ups
+
+Use this section to resume across sessions. Remove items as they ship.
+
+### 1. Functional gaps (not yet addressed)
+
+Already listed in *What's verified vs not* above, repeated here as actionable TODO:
+
+- **Light visual verification in Houdini/Karma.** All four types export data; per-type intensity tuning (Sphere × 1.0, Distant × 0.05, Dome × 0.01, plus `inputs:normalize = 1` and `radius = 0.1` for SphereLight) is the current convention. Needs a render-comparison sweep: AE preview vs Houdini render, all four types.
+- **3D AVLayer anchor point.** Currently ignored. Non-default anchors → wrong rotation/scale pivot. Plumb anchor into the transform composition (anchor-translate, then rot/scale, then anchor-untranslate, then position) when this becomes user-visible.
+- **Parented 2-node camera with animated parent.** AE stores `pointOfInterest` in *world* space while position is in *parent* space — mixed-space lookAt. Untested; suspect this breaks when both the camera and its parent are animated.
+- **Negative scale on AVLayers.** Untested; likely flips winding order without our handling.
+- **Layer time-stretch / time-remap.** Currently ignored — output uses comp-time samples, not source-time samples.
+- **X/Y/Z Rotation order (`Mi`) is `Z*Y*X`, untested.** All test cameras have zero individual X/Y/Z Rotations. If a `~2°` drift appears on cameras/nulls with non-zero values, suspect this Euler order next and run the probe trick.
+- **`FILM_WIDTH_MM` hardcoded to 36.** AE's `filmSize` isn't exposed via ExtendScript. If users with APS-C / S35 / etc. backs ask, expose it in the dialog.
+
+### How to resume a session
+
+1. Re-read this section first; tick off anything the user has confirmed since.
+2. For the README: read current `README.md`, apply the diff sketched above. Keep existing tone (early-release warning, TresSims convention block, terse install/usage).
+3. For functional gaps: run the probe-null trick before guessing math fixes.
+4. Bump `BUILD_DATE` at the top of `GegenschussAeUsdExporter.jsx` for each meaningful change (after `260428aa` continue alphabetically: `260428ab`, `ac`, …, or roll the date).
+5. **Never auto-commit.** Make the edit, save, tell the user briefly what changed, wait for `ship`.
