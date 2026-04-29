@@ -2,7 +2,7 @@
 
 Guidance for Claude (and contributors) working on this exporter. The conventions below were verified empirically against AE preview — please don't change them based on Adobe / forum / community sources without first re-running the probe in `Verifying against AE` below.
 
-## Coordinate convention (TresSims)
+## Coordinate convention
 
 ```
 position:  (x,  -y, -z)     # AE world → USD world
@@ -16,7 +16,11 @@ M_usd_col = S · R_ae · S         (column-vector form)
 M_usd_row = S · R_ae^T · S       (row-vector form for USD storage)
 ```
 
-Identity AE → identity USD. Applied uniformly to cameras, lights, nulls, AVLayers — no per-prim-type branching. If you find yourself wanting to add a sign-flip for one prim type only, you've probably misdiagnosed something else.
+The formula is the unique consequence of two requirements:
+1. AE is left-handed Y-down; USD is right-handed Y-up.  The basis change is `S = diag(1, -1, -1)`.
+2. Identity AE rotation must map to identity USD rotation (otherwise grafted Y-up geometry would tilt).
+
+There's no creative choice here — only one sign pattern satisfies both.  Applied uniformly to cameras, lights, nulls, AVLayers — no per-prim-type branching.  If you find yourself wanting to add a sign-flip for one prim type only, you've probably misdiagnosed something else.
 
 ## AE Orientation Euler order is `X*Y*Z`
 
@@ -120,7 +124,7 @@ Read per-frame from `cameraOption.zoom` (pixels) and converted via:
 flS.push([frame, FILM_WIDTH_MM * zoom / comp.width * MM_TO_USD]);
 ```
 
-`FILM_WIDTH_MM = 36` is hardcoded — AE's `filmSize` property isn't exposed via ExtendScript. If a project uses a non-default film back (e.g. APS-C 24 mm), edit the constant at the top of the script or expose it in the dialog.
+`FILM_WIDTH_MM` is exposed in the dialog (default 36 mm = AE's hidden default).  AE's `filmSize` isn't reachable from ExtendScript, so users with APS-C / S35 backs override it before export; the value persists in `app.settings`.
 
 USD `focalLength` units are "tenths of scene unit" with `metersPerUnit = 1`. A 50 mm AE camera lands as `focalLength = 0.5`, which Houdini reads correctly.
 
@@ -134,12 +138,19 @@ End-to-end against AE preview:
 - ✅ Translation, hierarchy, comp-centre offset
 - ✅ 1-node camera (static + animated)
 - ✅ 2-node camera (static + animated, with keyframed Orientation)
+- ✅ Parented 2-node camera/light with animated parent — POI is routed through an expression probe-null so `parent.fromWorld(camera.pointOfInterest)` evaluates per frame inside an AE expression (ExtendScript can't call fromWorld directly).
 - ✅ Camera focal length, aperture, focus distance
 - ✅ Static-value optimisation, dedup of held timeSamples
 - ✅ Visibility filter (eyeball off, solo)
 - ✅ Solid → quad mesh + displayColor
 - ✅ Footage → quad mesh + UsdPreviewSurface (texture, UV reader)
-- ✅ Text/Shape → bounding-box quad + detected fill colour
+- ✅ Text → triangulated glyph outlines via `Create Shapes from Text`; animated text (sourceText keys / range-selector animators) emits per-frame timeSampled mesh data; static text falls through to the cheap single-snapshot path; bbox-quad as last-resort fallback.
+- ✅ Shape → triangulated outline of every Path / Rect / Ellipse / Star primitive (incl. Pen-drawn Shape - Group)
+- ✅ Group-level Vector Transform applied — anchor / position / rotation / scale on a shape group composes correctly into the path coords.
+- ✅ 3D AVLayer anchor point — Solid / Footage / Text / Shape all anchor-shift their points so AE rotation/scale pivot lines up
+- ✅ Film width exposed in dialog (no more hardcoded 36 mm)
+- ✅ Non-uniform / negative AVLayer scale — bilateral conjugation derives `M_row = S * R_usd_row` (rows scaled by `s_i`); identical to the previous code for uniform scale, correct for the rest.
+- ✅ Layer time-stretch / time-remap — AE's `valueAtTime(t)` already accounts for both when reading transform properties, so comp-time sampling produces the right per-frame values.  No special handling required.
 - ✅ 2D parent / 2D-selected preflight (interactive convert-to-3D)
 - ✅ Multi-shape preflight (split layers with >1 Vector Group)
 - ✅ Versioned backup (Increment-and-Save / `.aep` copy fallback) before destructive AE ops
@@ -148,10 +159,7 @@ End-to-end against AE preview:
 
 Not yet visually verified:
 - ⚠️ All four light types (data is exported, framing/falloff in Houdini not confirmed)
-- ⚠️ 3D AVLayer anchor point (currently ignored — will mis-pivot for non-default anchors)
-- ⚠️ Parented 2-node camera with animated parent (POI is in world space, position in parent space — mixed-space lookAt)
-- ⚠️ Negative scale on AVLayers
-- ⚠️ Layer time-stretch / time-remap (script ignores)
+- ⚠️ Polygons with holes (letter "O") — render filled; outer + inner are both triangulated as one polygon, no hole subtraction
 
 When chasing one of these, run the probe trick first if rotation/orientation is involved.
 
@@ -161,20 +169,28 @@ Use this section to resume across sessions. Remove items as they ship.
 
 ### 1. Functional gaps (not yet addressed)
 
-Already listed in *What's verified vs not* above, repeated here as actionable TODO:
+Done since first release (kept here so future sessions don't re-litigate solved problems):
+
+- ✅ **Film width** — exposed in the dialog (default 36 mm).  AE's `filmSize` isn't scriptable, so the dialog is the bullet-proof workaround.  Persisted via `app.settings`.
+- ✅ **3D AVLayer anchor point** — every geo writer (solid, footage, text, shape) now anchor-shifts the mesh points so AE rotation/scale pivot lines up.
+- ✅ **Text + Shape vertex reconstruction** — text routes through AE's `Create Shapes from Text` command (acting on a duplicate so the original survives) and the resulting paths are walked, bezier-tessellated and ear-clip-triangulated into a real USD Mesh.  Shape layers walk Path / Rect / Ellipse / Star primitives directly.  Sub-property lookups now use matchName ("ADBE Vector Shape", "ADBE Vector Fill Color") so Pen-drawn shapes don't silently fall back to bbox.  Bbox quad remains as a last-resort fallback.
+- ✅ **Animated text** — `isTextAnimated` checks for sourceText keys / expression / text animators; if any is present, the pre-extract loop steps `comp.time` per frame and re-runs `Create Shapes from Text` so each frame's glyph outlines land in `extractedPathsByFrame`.  `writeAnimatedVectorMesh` then emits timeSampled `points` (and timeSampled `faceVertexCounts/Indices` when vertex count changes).  Held-run dedup keeps the file size sane.
+- ✅ **Parented 2-node camera with animated parent** — POI probe-null with `parent.fromWorld(camera.pointOfInterest)` expression provides per-frame parent-local POI; we read `position.valueAtTime` from the probe instead of trying `Layer.fromWorld()` from ExtendScript (which silently fails).
+- ✅ **Negative / non-uniform scale on AVLayers** — switched matrix baking from column-scaling (`R[i][j] * s_j`) to row-scaling (`R[i][j] * s_i`), matching the row-vector form derivation.
+- ✅ **Layer time-stretch / time-remap** — handled transparently by AE's `valueAtTime`, no special-case needed.  Comp-time samples produce correct per-frame transforms regardless of the layer's stretch/remap.
+- ✅ **Animation paths (per-type checkboxes)** — emitted as sibling `BasisCurves` prims under AE_Scene (`<primName>_path`).  Dialog has four checkboxes (Cameras, Lights, Nulls, AV layers); all default off, user opts in per type.  Per-frame world-space samples come from a `toWorld([0,0,0])` probe-null so parented + animated layers also produce correct trajectories.  Static paths are skipped.  `displayColor` per type — cam = yellow, light = orange, null = cyan, AVLayer = green.
+
+Still pending:
 
 - **Light visual verification in Houdini/Karma.** All four types export data; per-type intensity tuning (Sphere × 1.0, Distant × 0.05, Dome × 0.01, plus `inputs:normalize = 1` and `radius = 0.1` for SphereLight) is the current convention. Needs a render-comparison sweep: AE preview vs Houdini render, all four types.
-- **3D AVLayer anchor point.** Currently ignored. Non-default anchors → wrong rotation/scale pivot. Plumb anchor into the transform composition (anchor-translate, then rot/scale, then anchor-untranslate, then position) when this becomes user-visible.
-- **Parented 2-node camera with animated parent.** AE stores `pointOfInterest` in *world* space while position is in *parent* space — mixed-space lookAt. Untested; suspect this breaks when both the camera and its parent are animated.
-- **Negative scale on AVLayers.** Untested; likely flips winding order without our handling.
-- **Layer time-stretch / time-remap.** Currently ignored — output uses comp-time samples, not source-time samples.
 - **X/Y/Z Rotation order (`Mi`) is `Z*Y*X`, untested.** All test cameras have zero individual X/Y/Z Rotations. If a `~2°` drift appears on cameras/nulls with non-zero values, suspect this Euler order next and run the probe trick.
-- **`FILM_WIDTH_MM` hardcoded to 36.** AE's `filmSize` isn't exposed via ExtendScript. If users with APS-C / S35 / etc. backs ask, expose it in the dialog.
+- **Vector geometry edge cases.**  Currently skipped: Stroke (no fill), Trim Paths, Merge Paths, Repeater, Wiggle Paths, Pucker & Bloat, Twist.  Star roundness is not approximated (sharp points only).  Hole subtraction (letter "O") not implemented — outer + inner outlines both render filled.  All graceful — fall back to bbox quad when no paths could be extracted.
+- **Animated shape geometry.**  Shape layers are sampled once at `startFrame`; only text gets the per-frame extraction loop.  Layer-level transform animation still applies regardless.
 
 ### How to resume a session
 
 1. Re-read this section first; tick off anything the user has confirmed since.
-2. For the README: read current `README.md`, apply the diff sketched above. Keep existing tone (early-release warning, TresSims convention block, terse install/usage).
+2. For the README: read current `README.md`, apply the diff sketched above. Keep existing tone (early-release warning, coordinate-convention block, terse install/usage).
 3. For functional gaps: run the probe-null trick before guessing math fixes.
-4. Bump `BUILD_DATE` at the top of `GegenschussAeUsdExporter.jsx` for each meaningful change (after `260428aa` continue alphabetically: `260428ab`, `ac`, …, or roll the date).
+4. Bump `BUILD_DATE` at the top of `GegenschussAeUsdExporter.jsx` for each meaningful change (after `260429ae` continue alphabetically: `260429af`, `ag`, …, or roll the date).
 5. **Never auto-commit.** Make the edit, save, tell the user briefly what changed, wait for `ship`.

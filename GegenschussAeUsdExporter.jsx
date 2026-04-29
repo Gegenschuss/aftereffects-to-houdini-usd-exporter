@@ -1,8 +1,10 @@
 /**
- * AE → Houdini USD Exporter  (TresSims convention)
+ * AE → Houdini USD Exporter
  *
- * Exports AE Camera, Lights, and 3D layers to a USD ASCII file using the
- * AE→Houdini camera-importer convention documented by TresSims:
+ * Exports AE Camera, Lights, and 3D layers to a USD ASCII file.  The
+ * AE↔USD coordinate conversion is fully determined by the constraint
+ * "identity AE rotation must map to identity USD rotation" combined with
+ * the AE (left-handed, Y-down) → USD (right-handed, Y-up) basis change:
  *
  *     position:  (x,  -y, -z)
  *     rotation:  (rx, -ry, -rz)
@@ -50,9 +52,9 @@
 
     // AE's default camera uses 36 mm film width, measured horizontally
     // (CameraSettings → Film Size: 36 mm, Measure: Horizontally).  The film
-    // size isn't exposed via scripting, so we assume the default — change
-    // here if your AE project uses a different film back.
-    var FILM_WIDTH_MM = 36;
+    // size isn't exposed via scripting, so we ask the user via the export
+    // dialog (default 36; common alternates: APS-C ≈ 24, S35 ≈ 25).
+    var FILM_WIDTH_MM = 36;   // overridden from dialog below
     var PREFS_SECTION = "AE_USD_Exporter";
 
     // Persist dialog choices between runs via app.settings (per-user).
@@ -145,12 +147,46 @@
     }
 
     // ── Dialog ────────────────────────────────────────────────────────────
-    var BUILD_DATE = "260428aa";  // bump on each meaningful change (YYMMDD)
-    var dlg = new Window("dialog", "AE USD Exporter  " + BUILD_DATE);
+    var BUILD_DATE = "260429ag";  // bump on each meaningful change (YYMMDD)
+    var dlg = new Window("dialog", "AE → Houdini USD Exporter");
     dlg.orientation = "column";
     dlg.alignChildren = ["fill", "top"];
-    dlg.spacing = 6;
-    dlg.margins = 14;
+    dlg.spacing = 12;
+    dlg.margins = 18;
+
+    // ── Logo + build date (matches the other Gegenschuss AE panels) ────
+    // Logo PNG sits next to this script.  When the file is missing (script
+    // moved without copying the asset) the brand column still shows.
+    var logoRow = dlg.add("group");
+    logoRow.orientation = "row";
+    logoRow.alignment   = ["center", "top"];
+    logoRow.spacing     = 10;
+    logoRow.margins     = [0, 4, 0, 4];
+    try {
+        var logoFile = new File((new File($.fileName)).parent.fsName + "/Gegenschuss.png");
+        if (logoFile.exists) {
+            var logoImg = logoRow.add("image", undefined, logoFile);
+            logoImg.alignment = ["left", "center"];
+        }
+    } catch (e) {}
+    var brandCol = logoRow.add("group");
+    brandCol.orientation = "column";
+    brandCol.alignment   = ["left", "center"];
+    brandCol.spacing     = 2;
+    var buildLbl = brandCol.add("statictext", undefined, BUILD_DATE);
+    buildLbl.graphics.font = ScriptUI.newFont("Helvetica", "REGULAR", 11);
+    buildLbl.graphics.foregroundColor =
+        buildLbl.graphics.newPen(buildLbl.graphics.PenType.SOLID_COLOR, [0.55, 0.55, 0.55, 1], 1);
+    var ghLbl = brandCol.add("statictext", undefined, "github.com/");
+    ghLbl.graphics.font = ScriptUI.newFont("Helvetica", "REGULAR", 10);
+    ghLbl.graphics.foregroundColor =
+        ghLbl.graphics.newPen(ghLbl.graphics.PenType.SOLID_COLOR, [0.4, 0.4, 0.4, 1], 1);
+    var ghName = brandCol.add("statictext", undefined, "Gegenschuss");
+    ghName.graphics.font = ScriptUI.newFont("Helvetica", "REGULAR", 10);
+    ghName.graphics.foregroundColor =
+        ghName.graphics.newPen(ghName.graphics.PenType.SOLID_COLOR, [0.4, 0.4, 0.4, 1], 1);
+
+    dlg.add("panel");
 
     // Comp + layer breakdown summary.
     var nCams = 0, nLights = 0, nNulls = 0, nSolids = 0, nFootage = 0,
@@ -230,6 +266,30 @@
     var farInput = grpRow1.add("edittext", undefined, loadPref("clipFar", "100000"));
     farInput.preferredSize.width = 65;
 
+    // Film width \u2014 AE's filmSize isn't scriptable, so users with non-default
+    // film backs (APS-C / S35 / etc.) override here.  Default 36mm matches
+    // AE's CameraSettings default (Film Size = 36 mm, measured horizontally).
+    var grpRow2 = dlg.add("group");
+    grpRow2.alignChildren = ["left", "center"];
+    grpRow2.add("statictext", undefined, "Film width");
+    var filmInput = grpRow2.add("edittext", undefined, loadPref("filmWidth", "36"));
+    filmInput.preferredSize.width = 50;
+    grpRow2.add("statictext", undefined, "mm   (36 = full-frame, 24 \u2248 APS-C, 25 \u2248 S35)");
+
+    // Hint \u2014 AE's filmSize isn't exposed via scripting; the values above are
+    // matched against the AE Camera Settings default.  Mismatched film width
+    // throws focal length / aperture off, so leave it alone unless you know
+    // your project uses a non-default sensor back.
+    var hintWarn = dlg.add("statictext", undefined,
+        "Don't change the values above unless you know what you're doing \u2014 they match AE's CameraSettings defaults.",
+        { multiline: true });
+    hintWarn.preferredSize.width = 460;
+    hintWarn.graphics.font = ScriptUI.newFont("Helvetica", "ITALIC", 10);
+    hintWarn.graphics.foregroundColor =
+        hintWarn.graphics.newPen(hintWarn.graphics.PenType.SOLID_COLOR, [0.55, 0.55, 0.55, 1], 1);
+
+    dlg.add("panel");
+
     // Frame range inline
     var grpRange = dlg.add("group");
     grpRange.alignChildren = ["left", "center"];
@@ -245,6 +305,21 @@
     var chkVisible = dlg.add("checkbox", undefined, "Visible only");
     chkVisible.value = (loadPref("visibleOnly", "1") === "1");
 
+    // Per-type animation-path checkboxes — emit a sibling BasisCurves
+    // trajectory for each animated layer of the chosen kind.  All default
+    // off; user opts in per type when paths are wanted.
+    var grpPaths = dlg.add("group");
+    grpPaths.alignChildren = ["left", "center"];
+    grpPaths.add("statictext", undefined, "Animation paths:");
+    var chkPathCam   = grpPaths.add("checkbox", undefined, "Cameras");
+    var chkPathLight = grpPaths.add("checkbox", undefined, "Lights");
+    var chkPathNull  = grpPaths.add("checkbox", undefined, "Nulls");
+    var chkPathAV    = grpPaths.add("checkbox", undefined, "AV layers");
+    chkPathCam  .value = (loadPref("pathsCam",   "0") === "1");
+    chkPathLight.value = (loadPref("pathsLight", "0") === "1");
+    chkPathNull .value = (loadPref("pathsNull",  "0") === "1");
+    chkPathAV   .value = (loadPref("pathsAV",    "0") === "1");
+
     var grpBtns = dlg.add("group");
     grpBtns.alignment = ["fill", "top"];
     var btnReset = grpBtns.add("button", undefined, "Reset");
@@ -257,13 +332,18 @@
     btnSave.alignment   = ["right", "center"];
 
     btnReset.onClick = function () {
-        scaleInput.text  = "100";
-        nearInput.text   = "0.1";
-        farInput.text    = "100000";
-        rbSingle.value   = false;
-        rbWork.value     = false;
-        rbFull.value     = true;
-        chkVisible.value = true;
+        scaleInput.text   = "100";
+        nearInput.text    = "0.1";
+        farInput.text     = "100000";
+        filmInput.text    = "36";
+        rbSingle.value    = false;
+        rbWork.value      = false;
+        rbFull.value      = true;
+        chkVisible.value  = true;
+        chkPathCam.value   = false;
+        chkPathLight.value = false;
+        chkPathNull.value  = false;
+        chkPathAV.value    = false;
     };
 
     var outFile = null;
@@ -283,18 +363,28 @@
     if (!/\.usda$/i.test(outPath)) outPath += '.usda';
     outFile = new File(outPath);
 
-    var scale        = parseFloat(scaleInput.text) || 100;
-    var clipNear     = parseFloat(nearInput.text)  || 0.1;
-    var clipFar      = parseFloat(farInput.text)   || 100000;
-    var centerOffset = true;                  // always centre comp at world origin
-    var visibleOnly  = chkVisible.value;
+    var scale         = parseFloat(scaleInput.text) || 100;
+    var clipNear      = parseFloat(nearInput.text)  || 0.1;
+    var clipFar       = parseFloat(farInput.text)   || 100000;
+    FILM_WIDTH_MM     = parseFloat(filmInput.text)  || 36;
+    var centerOffset  = true;                  // always centre comp at world origin
+    var visibleOnly   = chkVisible.value;
+    var emitPathCam   = chkPathCam.value;
+    var emitPathLight = chkPathLight.value;
+    var emitPathNull  = chkPathNull.value;
+    var emitPathAV    = chkPathAV.value;
 
     // Persist for next run.
     savePref("scale",       scaleInput.text);
     savePref("clipNear",    nearInput.text);
     savePref("clipFar",     farInput.text);
+    savePref("filmWidth",   filmInput.text);
     savePref("frameRange",  rbSingle.value ? "single" : (rbFull.value ? "full" : "work"));
-    savePref("visibleOnly", chkVisible.value ? "1" : "0");
+    savePref("visibleOnly", chkVisible.value  ? "1" : "0");
+    savePref("pathsCam",    chkPathCam.value  ? "1" : "0");
+    savePref("pathsLight",  chkPathLight.value ? "1" : "0");
+    savePref("pathsNull",   chkPathNull.value  ? "1" : "0");
+    savePref("pathsAV",     chkPathAV.value    ? "1" : "0");
 
     // ── Frame range ───────────────────────────────────────────────────────
     var fps = comp.frameRate;
@@ -784,8 +874,9 @@
 
     // ── AE → USD rotation  (bilateral conjugation) ─────────────────────────
     // M_usd_row = S · R_ae^T · S,  with S = diag(1, -1, -1).
-    // Equivalent to the Euler-level substitution (rx, -ry, -rz) used by the
-    // TresSims AE→Houdini importer.  Identity AE → identity USD.
+    // Equivalent to the Euler-level substitution (rx, -ry, -rz).  The
+    // formula is fully determined by the AE→USD basis change combined
+    // with "identity AE → identity USD".
     //
     //   (S · R^T · S)[i][j] = sign(i) · R[j][i] · sign(j)
     //   signs: i/j = 0 → +1,  i/j = 1,2 → −1
@@ -795,6 +886,535 @@
             [-R[0][1],  R[1][1],  R[2][1]],
             [-R[0][2],  R[1][2],  R[2][2]]
         ];
+    }
+
+    // ── 2D vector geometry (text + shape vertex reconstruction) ───────────
+    // Tessellates AE Path beziers into polylines, ear-clips into triangles,
+    // and emits USD Mesh.  Used by writeShapeGeo and writeTextGeo so glyphs
+    // and vector outlines become real geometry instead of bbox quads.
+
+    function identityM3x3() {
+        return [[1,0,0], [0,1,0], [0,0,1]];
+    }
+    function m3x3mul(a, b) {
+        var r = [[0,0,0],[0,0,0],[0,0,0]];
+        for (var i = 0; i < 3; i++)
+            for (var j = 0; j < 3; j++)
+                for (var k = 0; k < 3; k++)
+                    r[i][j] += a[i][k] * b[k][j];
+        return r;
+    }
+    function transformPoints2D(points, M) {
+        var out = [];
+        for (var i = 0; i < points.length; i++) {
+            var p = points[i];
+            out.push([
+                M[0][0]*p[0] + M[0][1]*p[1] + M[0][2],
+                M[1][0]*p[0] + M[1][1]*p[1] + M[1][2]
+            ]);
+        }
+        return out;
+    }
+
+    // AE shape-group transform → 2D affine 3×3.  Composes T(pos) · R · S
+    // around (-anchor) so the group's rotation/scale pivot at its anchor.
+    function readVectorTransform(transformGroup, time) {
+        var anchor = [0, 0], pos = [0, 0], rot = 0, scl = [100, 100];
+        try { anchor = transformGroup.property("ADBE Vector Anchor")  .valueAtTime(time, false); } catch (e) {}
+        try { pos    = transformGroup.property("ADBE Vector Position").valueAtTime(time, false); } catch (e) {}
+        try { rot    = transformGroup.property("ADBE Vector Rotation").valueAtTime(time, false); } catch (e) {}
+        try { scl    = transformGroup.property("ADBE Vector Scale")   .valueAtTime(time, false); } catch (e) {}
+        var sx = scl[0] / 100, sy = scl[1] / 100;
+        var rad = rot * Math.PI / 180;
+        var cR = Math.cos(rad), sR = Math.sin(rad);
+        // M = T(pos) * R * S * T(-anchor)  →  3x3 with translation = pos - R*S*anchor
+        var a00 =  cR * sx, a01 = -sR * sy;
+        var a10 =  sR * sx, a11 =  cR * sy;
+        var tx  = pos[0] - (a00 * anchor[0] + a01 * anchor[1]);
+        var ty  = pos[1] - (a10 * anchor[0] + a11 * anchor[1]);
+        return [[a00, a01, tx], [a10, a11, ty], [0, 0, 1]];
+    }
+
+    // Cubic bezier tessellation.  AE Path: vertices[i] is the on-curve point;
+    // outTangents[i] / inTangents[i] are CONTROL POINT OFFSETS from that vertex.
+    // Each segment from V_i to V_{i+1} uses control points V_i + outT_i and
+    // V_{i+1} + inT_{i+1}.
+    function tessellatePath(shape, segs) {
+        var verts = shape.vertices || [];
+        var inT   = shape.inTangents  || [];
+        var outT  = shape.outTangents || [];
+        var closed = shape.closed !== false;
+        var n = verts.length;
+        if (n < 2) return [];
+        var result = [];
+        function emit(P0, T0o, P1, T1i, includeFirst) {
+            var c0 = [P0[0] + T0o[0], P0[1] + T0o[1]];
+            var c1 = [P1[0] + T1i[0], P1[1] + T1i[1]];
+            if (includeFirst) result.push([P0[0], P0[1]]);
+            for (var s = 1; s <= segs; s++) {
+                var t = s / segs;
+                var u = 1 - t;
+                var x = u*u*u*P0[0] + 3*u*u*t*c0[0] + 3*u*t*t*c1[0] + t*t*t*P1[0];
+                var y = u*u*u*P0[1] + 3*u*u*t*c0[1] + 3*u*t*t*c1[1] + t*t*t*P1[1];
+                result.push([x, y]);
+            }
+        }
+        for (var i = 0; i < n - 1; i++) {
+            emit(verts[i], outT[i] || [0,0], verts[i+1], inT[i+1] || [0,0], i === 0);
+        }
+        if (closed) {
+            emit(verts[n-1], outT[n-1] || [0,0], verts[0], inT[0] || [0,0], false);
+        }
+        return result;
+    }
+
+    // Drop near-duplicate adjacent vertices (cubic-bezier tessellation can
+    // emit them when in/out tangents are zero) and the closing duplicate
+    // when the polyline ends where it started.
+    function dedupAdjacent(poly) {
+        var out = [];
+        for (var i = 0; i < poly.length; i++) {
+            var p = poly[i];
+            if (out.length === 0) { out.push(p); continue; }
+            var last = out[out.length - 1];
+            if (Math.abs(p[0] - last[0]) > 1e-5 || Math.abs(p[1] - last[1]) > 1e-5) {
+                out.push(p);
+            }
+        }
+        if (out.length > 1) {
+            var first = out[0], lastV = out[out.length - 1];
+            if (Math.abs(first[0] - lastV[0]) < 1e-5 && Math.abs(first[1] - lastV[1]) < 1e-5) {
+                out.pop();
+            }
+        }
+        return out;
+    }
+
+    // Ear-clipping triangulation.  Handles simple (non-self-intersecting)
+    // polygons; assumes a single closed loop.  Polygons with holes (e.g.
+    // letter "O") render filled — outer + inner outline both get filled
+    // and the hole isn't subtracted.  Acceptable v1 trade-off; libtess-quality
+    // hole handling is a future polish item.
+    function earClipTriangulate(verts) {
+        var n = verts.length;
+        if (n < 3) return [];
+        if (n === 3) return [[0, 1, 2]];
+
+        // Signed area picks the winding; force CCW so isEar's positive-cross
+        // convex test works.  We keep the original index mapping in `idx`.
+        var area = 0;
+        for (var i = 0; i < n; i++) {
+            var j = (i + 1) % n;
+            area += verts[i][0] * verts[j][1] - verts[j][0] * verts[i][1];
+        }
+        var idx = [];
+        if (area > 0) { for (var i = 0; i < n; i++) idx.push(i); }
+        else          { for (var i = n - 1; i >= 0; i--) idx.push(i); }
+
+        var tris = [];
+        var safety = n * n;   // bail before worst-case O(n^3)
+        while (idx.length > 3 && safety-- > 0) {
+            var clipped = false;
+            for (var i = 0; i < idx.length; i++) {
+                var prev = idx[(i - 1 + idx.length) % idx.length];
+                var curr = idx[i];
+                var next = idx[(i + 1) % idx.length];
+                if (isEar(verts, idx, prev, curr, next)) {
+                    tris.push([prev, curr, next]);
+                    idx.splice(i, 1);
+                    clipped = true;
+                    break;
+                }
+            }
+            if (!clipped) break;   // self-intersecting / degenerate; emit partial
+        }
+        if (idx.length === 3) tris.push([idx[0], idx[1], idx[2]]);
+        return tris;
+    }
+
+    function isEar(verts, idx, i0, i1, i2) {
+        var p0 = verts[i0], p1 = verts[i1], p2 = verts[i2];
+        // Convex check: cross > 0 (we forced CCW).
+        var cross = (p1[0]-p0[0])*(p2[1]-p0[1]) - (p1[1]-p0[1])*(p2[0]-p0[0]);
+        if (cross <= 0) return false;
+        // No other vertex of the polygon lies inside the candidate triangle.
+        for (var k = 0; k < idx.length; k++) {
+            var j = idx[k];
+            if (j === i0 || j === i1 || j === i2) continue;
+            if (pointInTriangle(verts[j], p0, p1, p2)) return false;
+        }
+        return true;
+    }
+    function pointInTriangle(p, a, b, c) {
+        function s(p, a, b) {
+            return (p[0]-b[0]) * (a[1]-b[1]) - (a[0]-b[0]) * (p[1]-b[1]);
+        }
+        var d1 = s(p, a, b), d2 = s(p, b, c), d3 = s(p, c, a);
+        var hasNeg = d1 < 0 || d2 < 0 || d3 < 0;
+        var hasPos = d1 > 0 || d2 > 0 || d3 > 0;
+        return !(hasNeg && hasPos);
+    }
+
+    // Parametric primitive → Path (bezier vertex+tangent form).  Rect with
+    // roundness > 0 uses 4 cubics with k = 0.5523 to approximate the corner;
+    // ellipse uses 4 cubics for the full curve.
+    var BEZIER_K = 0.5522847498;
+    function makeRectShape(rectProp, time) {
+        var size = [100, 100], pos = [0, 0], rounded = 0;
+        try { size    = rectProp.property("ADBE Vector Rect Size")     .valueAtTime(time, false); } catch (e) {}
+        try { pos     = rectProp.property("ADBE Vector Rect Position") .valueAtTime(time, false); } catch (e) {}
+        try { rounded = rectProp.property("ADBE Vector Rect Roundness").valueAtTime(time, false); } catch (e) {}
+        var w = size[0], h = size[1];
+        var x1 = pos[0] - w/2, x2 = pos[0] + w/2;
+        var y1 = pos[1] - h/2, y2 = pos[1] + h/2;
+        if (rounded < 0.5) {
+            return {
+                vertices:    [[x1, y1], [x2, y1], [x2, y2], [x1, y2]],
+                inTangents:  [[0,0], [0,0], [0,0], [0,0]],
+                outTangents: [[0,0], [0,0], [0,0], [0,0]],
+                closed:      true
+            };
+        }
+        var r = Math.min(rounded, w/2, h/2);
+        var k = BEZIER_K * r;
+        return {
+            vertices: [
+                [x1+r, y1], [x2-r, y1], [x2, y1+r], [x2, y2-r],
+                [x2-r, y2], [x1+r, y2], [x1, y2-r], [x1, y1+r]
+            ],
+            inTangents: [
+                [-k, 0], [0,  0], [0, -k], [0, 0],
+                [ k, 0], [0,  0], [0,  k], [0, 0]
+            ],
+            outTangents: [
+                [0, 0], [ k,  0], [0, 0], [0,  k],
+                [0, 0], [-k,  0], [0, 0], [0, -k]
+            ],
+            closed: true
+        };
+    }
+    function makeEllipseShape(ellProp, time) {
+        var size = [100, 100], pos = [0, 0];
+        try { size = ellProp.property("ADBE Vector Ellipse Size")    .valueAtTime(time, false); } catch (e) {}
+        try { pos  = ellProp.property("ADBE Vector Ellipse Position").valueAtTime(time, false); } catch (e) {}
+        var rx = size[0] / 2, ry = size[1] / 2;
+        var cx = pos[0], cy = pos[1];
+        var kx = BEZIER_K * rx, ky = BEZIER_K * ry;
+        return {
+            vertices:    [[cx, cy-ry], [cx+rx, cy], [cx, cy+ry], [cx-rx, cy]],
+            inTangents:  [[-kx, 0], [0, -ky], [ kx, 0], [0,  ky]],
+            outTangents: [[ kx, 0], [0,  ky], [-kx, 0], [0, -ky]],
+            closed: true
+        };
+    }
+
+    // Star / Polygon primitive.  Type 1 = polygon (N points around outer
+    // radius); Type 2 = star (2N points alternating inner/outer).  Roundness
+    // is approximated by zeroing out tangents — sharp points only in v1.
+    function makeStarShape(starProp, time) {
+        var type = 2, n = 5, pos = [0, 0], rot = 0, outR = 100, innR = 50;
+        try { type = starProp.property("ADBE Vector Star Type")        .valueAtTime(time, false); } catch (e) {}
+        try { n    = starProp.property("ADBE Vector Star Points")      .valueAtTime(time, false); } catch (e) {}
+        try { pos  = starProp.property("ADBE Vector Star Position")    .valueAtTime(time, false); } catch (e) {}
+        try { rot  = starProp.property("ADBE Vector Star Rotation")    .valueAtTime(time, false); } catch (e) {}
+        try { outR = starProp.property("ADBE Vector Star Outer Radius").valueAtTime(time, false); } catch (e) {}
+        try { innR = starProp.property("ADBE Vector Star Inner Radius").valueAtTime(time, false); } catch (e) {}
+        n = Math.max(3, Math.round(n));
+        var nVerts = (type === 2) ? n * 2 : n;
+        var verts = [], zeroT = [];
+        var step = (2 * Math.PI) / nVerts;
+        var phase = (rot - 90) * Math.PI / 180;     // AE 0° points up; -90° offset
+        for (var i = 0; i < nVerts; i++) {
+            var theta = phase + i * step;
+            var r = (type === 2 && (i % 2 === 1)) ? innR : outR;
+            verts.push([pos[0] + r * Math.cos(theta), pos[1] + r * Math.sin(theta)]);
+            zeroT.push([0, 0]);
+        }
+        return {
+            vertices: verts,
+            inTangents: zeroT,
+            outTangents: zeroT.slice(),
+            closed: true
+        };
+    }
+
+    // Sub-property lookup helpers — try matchName first (locale-stable),
+    // fall back to display name, then index-scan.  A previous version
+    // relied on `p.property("Path")` / `p.property("Color")` exclusively;
+    // those quietly returned null in some AE configurations and the whole
+    // shape went unwalked (extractedPaths empty → bbox fallback).
+    function findShapePathProp(shapeGroup) {
+        var hit = null;
+        try { hit = shapeGroup.property("ADBE Vector Shape"); } catch (e) {}
+        if (hit) return hit;
+        try { hit = shapeGroup.property("Path"); } catch (e) {}
+        if (hit) return hit;
+        try {
+            for (var i = 1; i <= shapeGroup.numProperties; i++) {
+                var sub = shapeGroup.property(i);
+                if (sub && sub.matchName === "ADBE Vector Shape") return sub;
+            }
+        } catch (e) {}
+        return null;
+    }
+    function findFillColorValue(fillProp, time) {
+        var col = null;
+        try {
+            var byMn = fillProp.property("ADBE Vector Fill Color");
+            if (byMn) col = byMn.valueAtTime(time, false);
+        } catch (e) {}
+        if (!col) {
+            try {
+                var byDn = fillProp.property("Color");
+                if (byDn) col = byDn.valueAtTime(time, false);
+            } catch (e) {}
+        }
+        return col;
+    }
+    function findTransformGroup(vectorGroupContents) {
+        try {
+            for (var i = 1; i <= vectorGroupContents.numProperties; i++) {
+                var sub = vectorGroupContents.property(i);
+                if (sub && sub.matchName === "ADBE Vector Transform Group") return sub;
+            }
+        } catch (e) {}
+        return null;
+    }
+
+    // Walks layer.property("Contents") of a shape layer, applying each
+    // Vector Group's Transform stack and propagating Fill colour.  Returns
+    // an array of { poly, color, closed } where poly is in layer-local
+    // coords (NOT yet anchor-shifted — caller does that in writeVectorMesh).
+    function extractShapePaths(layer, time) {
+        var out = [];
+        var contents;
+        try { contents = layer.property("Contents"); } catch (e) { return out; }
+        if (!contents || typeof contents.numProperties !== "number") return out;
+        walkVectorGroup(contents, identityM3x3(), [0.5, 0.5, 0.5], out, time);
+        return out;
+    }
+
+    function walkVectorGroup(groupProp, parentXform, parentColor, out, time) {
+        // First pass: pick up the local Transform Group (if any) and the
+        // first Fill (so nested shapes inherit it).
+        var localXform = identityM3x3();
+        var color = parentColor;
+        for (var i = 1; i <= groupProp.numProperties; i++) {
+            var p;
+            try { p = groupProp.property(i); } catch (e) { continue; }
+            if (!p) continue;
+            var mn;
+            try { mn = p.matchName; } catch (e) { continue; }
+            if (mn === "ADBE Vector Transform Group") {
+                localXform = readVectorTransform(p, time);
+            } else if (mn === "ADBE Vector Graphic - Fill") {
+                var col = findFillColorValue(p, time);
+                if (col) color = [col[0], col[1], col[2]];
+            }
+        }
+        var fullXform = m3x3mul(parentXform, localXform);
+
+        // Second pass: recurse into Vector Groups, emit paths for shapes.
+        for (var i = 1; i <= groupProp.numProperties; i++) {
+            var p;
+            try { p = groupProp.property(i); } catch (e) { continue; }
+            if (!p) continue;
+            var mn;
+            try { mn = p.matchName; } catch (e) { continue; }
+
+            if (mn === "ADBE Vector Group") {
+                // Vector Group's Transform Group sits inside its Contents
+                // (alongside the shape primitives), so the recursive call
+                // picks it up via the first pass above.
+                var nested;
+                try { nested = p.property("Contents"); } catch (e) { continue; }
+                if (!nested) {
+                    try { nested = p.property("ADBE Vectors Group"); } catch (e) {}
+                }
+                if (nested) walkVectorGroup(nested, fullXform, color, out, time);
+
+            } else if (mn === "ADBE Vector Shape - Group") {
+                var pathProp = findShapePathProp(p);
+                if (!pathProp) continue;
+                try {
+                    var shape = pathProp.valueAtTime(time, false);
+                    if (shape && shape.vertices && shape.vertices.length >= 2) {
+                        var poly = tessellatePath(shape, 8);
+                        poly = transformPoints2D(poly, fullXform);
+                        out.push({ poly: poly, color: color,
+                                   closed: shape.closed !== false });
+                    }
+                } catch (e) {}
+
+            } else if (mn === "ADBE Vector Shape - Rect") {
+                var rs = makeRectShape(p, time);
+                if (rs) {
+                    var rp = tessellatePath(rs, 8);
+                    rp = transformPoints2D(rp, fullXform);
+                    out.push({ poly: rp, color: color, closed: true });
+                }
+
+            } else if (mn === "ADBE Vector Shape - Ellipse") {
+                var es = makeEllipseShape(p, time);
+                if (es) {
+                    var ep = tessellatePath(es, 12);
+                    ep = transformPoints2D(ep, fullXform);
+                    out.push({ poly: ep, color: color, closed: true });
+                }
+
+            } else if (mn === "ADBE Vector Shape - Star") {
+                var st = makeStarShape(p, time);
+                if (st) {
+                    var sp = tessellatePath(st, 1);   // sharp points, linear segs
+                    sp = transformPoints2D(sp, fullXform);
+                    out.push({ poly: sp, color: color, closed: true });
+                }
+
+            }
+            // Skipped: Stroke, Trim Paths, Merge Paths, Repeater,
+            // Pucker & Bloat, Wiggle Paths, etc.  Document in
+            // known-limitations if they end up biting users.
+        }
+    }
+
+    // Convert a text layer to a shape layer via AE's "Create Shapes from
+    // Text" menu command, on a duplicate so the original stays intact.
+    // Returns { shape, dup, success }; the caller MUST call cleanupConvertedText
+    // to dispose both temp layers (within the same undo group).
+    function convertTextToShapes(textLayer) {
+        var textComp = textLayer.containingComp;
+
+        var savedSel = [];
+        for (var si = 1; si <= textComp.numLayers; si++) {
+            var sl = textComp.layer(si);
+            try { if (sl.selected) savedSel.push(sl); sl.selected = false; } catch (e) {}
+        }
+
+        var dup = null, newShape = null, success = false;
+        try {
+            dup = textLayer.duplicate();
+            dup.selected = true;
+            var cmdId = app.findMenuCommandId("Create Shapes from Text");
+            if (!cmdId) {
+                try { dup.remove(); } catch (e) {}
+                dup = null;
+            } else {
+                // Snapshot pre-existing layer references so we can spot the
+                // newly-created shape layer (the command adds it at the top
+                // of the comp; identity comparison avoids index-shift bugs).
+                var preRefs = [];
+                for (var ri = 1; ri <= textComp.numLayers; ri++) preRefs.push(textComp.layer(ri));
+
+                app.executeCommand(cmdId);
+
+                for (var ai = 1; ai <= textComp.numLayers; ai++) {
+                    var L = textComp.layer(ai);
+                    var seen = false;
+                    for (var pi = 0; pi < preRefs.length; pi++) {
+                        if (preRefs[pi] === L) { seen = true; break; }
+                    }
+                    if (seen) continue;
+                    var isShape = false;
+                    try {
+                        if (L instanceof ShapeLayer) isShape = true;
+                        else if (L.matchName === "ADBE Vector Layer") isShape = true;
+                    } catch (e) {}
+                    if (isShape) { newShape = L; success = true; break; }
+                }
+            }
+        } catch (e) {}
+
+        // Restore selection regardless of outcome.
+        for (var ri2 = 0; ri2 < savedSel.length; ri2++) {
+            try { savedSel[ri2].selected = true; } catch (e) {}
+        }
+
+        return { shape: newShape, dup: dup, success: success };
+    }
+
+    function cleanupConvertedText(result) {
+        if (!result) return;
+        if (result.shape) try { result.shape.remove(); } catch (e) {}
+        if (result.dup)   try { result.dup  .remove(); } catch (e) {}
+    }
+
+    // Detect whether a text layer's CONTENT animates (per-frame text changes).
+    // Layer-level transform animation (position / rotation / scale on the
+    // text layer itself) is captured by the matrix sampler regardless and
+    // doesn't require per-frame mesh extraction.
+    function isTextAnimated(textLayer) {
+        try {
+            var st = textLayer.text.sourceText;
+            if (st && st.numKeys && st.numKeys > 0) return true;
+            try {
+                if (st && st.expressionEnabled && st.expression && st.expression.length > 0) return true;
+            } catch (e) {}
+        } catch (e) {}
+        // Per-character / range-selector animators live under
+        // "ADBE Text Properties" → "ADBE Text Animators".  Their presence is
+        // a strong signal that the rendered glyphs differ frame to frame.
+        try {
+            var ta = textLayer.property("ADBE Text Properties").property("ADBE Text Animators");
+            if (ta && ta.numProperties > 0) return true;
+        } catch (e) {}
+        return false;
+    }
+
+    // POI-probe trick — `Layer.fromWorld()` isn't directly callable from
+    // ExtendScript, only inside an expression.  For a parented 2-node camera
+    // / light we need the camera's pointOfInterest expressed in the parent's
+    // local frame so it composes with the camera's parent-local position.
+    // We create a null parented to the camera's parent and bind its
+    // `position` to `parent.fromWorld(camera.pointOfInterest)` — reading
+    // `position.valueAtTime(t)` then gives us per-frame parent-local POI.
+    function exprQuoteName(s) {
+        // AE expressions use double-quoted layer names; escape backslashes
+        // and double-quotes.  Names with newlines aren't worth supporting.
+        return String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    }
+    function createPoiProbe(camLayer, primName) {
+        if (!camLayer || !camLayer.parent) return null;
+        var pComp = camLayer.containingComp;
+        var n;
+        try {
+            n = pComp.layers.addNull();
+            n.threeDLayer = true;
+            n.parent = camLayer.parent;
+            n.name = "_AE2USD_poi_probe_" + (primName || camLayer.index);
+            n.enabled = false;            // never render the probe
+            n.shy = true;                 // tuck it away in the UI
+            var camRef = 'thisComp.layer("' + exprQuoteName(camLayer.name) + '")';
+            var parRef = 'thisComp.layer("' + exprQuoteName(camLayer.parent.name) + '")';
+            n.position.expression = parRef + '.fromWorld(' + camRef + '.pointOfInterest)';
+        } catch (e) {
+            if (n) try { n.remove(); } catch (e2) {}
+            return null;
+        }
+        return n;
+    }
+
+    // World-path probe — same trick, but reads `layer.toWorld([0,0,0])` so the
+    // null's per-frame position equals the layer's WORLD-space origin.  Lets
+    // us emit a static `BasisCurves` showing the trajectory of an animated
+    // camera / light even when the layer is parented to an animated null.
+    function createWorldPathProbe(targetLayer, primName) {
+        if (!targetLayer) return null;
+        var pComp = targetLayer.containingComp;
+        var n;
+        try {
+            n = pComp.layers.addNull();
+            n.threeDLayer = true;
+            // No parent — null position is in comp world space directly.
+            n.name = "_AE2USD_path_probe_" + (primName || targetLayer.index);
+            n.enabled = false;
+            n.shy = true;
+            var ref = 'thisComp.layer("' + exprQuoteName(targetLayer.name) + '")';
+            n.position.expression = ref + '.toWorld([0, 0, 0])';
+        } catch (e) {
+            if (n) try { n.remove(); } catch (e2) {}
+            return null;
+        }
+        return n;
     }
 
     function readRot(layer, t) {
@@ -829,7 +1449,101 @@
         return s;
     }
 
+    // ── Pre-extract text + shape vertex paths ─────────────────────────────
+    // Walks each shape layer's "Contents" tree and tessellates beziers into
+    // 2D polylines.  Text layers are routed through AE's "Create Shapes from
+    // Text" command (acting on a duplicate so the original is preserved);
+    // both temp layers are removed before the export continues.  Result
+    // lands on nfo.extractedPaths and is consumed by writeShapeGeo /
+    // writeTextGeo when emitting the USD Mesh.  Skips silently on failure
+    // (writeBoundsGeo fallback covers the no-paths case).
+    var anyTextOrShape = false;
+    for (var ext1 = 0; ext1 < layerInfos.length; ext1++) {
+        if (layerInfos[ext1].isText || layerInfos[ext1].isShape) {
+            anyTextOrShape = true; break;
+        }
+    }
+    if (anyTextOrShape) {
+        // Text routing through `Create Shapes from Text` is AE-side destructive
+        // (on a duplicate; original is preserved); match the 2D-flip / multi-
+        // shape preflights and gate behind ensureBackup so the user always
+        // has Cmd-Z + a versioned .aep to fall back on.  Falls through with
+        // bbox quad fallback if the user declines.
+        if (ensureBackup()) {
+            app.beginUndoGroup("AE USD Exporter — extract text/shape paths");
+            // Animated text needs comp.time bumped before each conversion
+            // (the menu command bakes the rendered text at currentTime); we
+            // restore comp.time after the loop.
+            var origCompTime = comp.time;
+            try {
+                for (var ext2 = 0; ext2 < layerInfos.length; ext2++) {
+                    var nfoX = layerInfos[ext2];
+                    if (nfoX.isText) {
+                        if (isTextAnimated(nfoX.layer)) {
+                            // Per-frame extraction.  Slow (one menu command
+                            // per frame per text layer), but the only way to
+                            // capture sourceText / range-selector animation.
+                            nfoX.extractedPathsByFrame = [];
+                            for (var f = startFrame; f <= endFrame; f++) {
+                                var tF = f / fps;
+                                try { comp.time = tF; } catch (e) {}
+                                var convF = convertTextToShapes(nfoX.layer);
+                                var pathsF = (convF && convF.success && convF.shape)
+                                    ? extractShapePaths(convF.shape, tF)
+                                    : [];
+                                cleanupConvertedText(convF);
+                                nfoX.extractedPathsByFrame.push({ frame: f, paths: pathsF });
+                            }
+                        } else {
+                            // Static text — single conversion at startFrame.
+                            var snapTime = startFrame / fps;
+                            try { comp.time = snapTime; } catch (e) {}
+                            var conv = convertTextToShapes(nfoX.layer);
+                            if (conv && conv.success && conv.shape) {
+                                nfoX.extractedPaths = extractShapePaths(conv.shape, snapTime);
+                            }
+                            cleanupConvertedText(conv);
+                        }
+                    } else if (nfoX.isShape) {
+                        nfoX.extractedPaths = extractShapePaths(nfoX.layer, startFrame / fps);
+                    }
+                }
+            } catch (e) {}
+            try { comp.time = origCompTime; } catch (e) {}
+            app.endUndoGroup();
+        }
+    }
+
     // ── Sample all frames ─────────────────────────────────────────────────
+    // We create temporary null layers to read values that ExtendScript
+    // can't compute directly:
+    //   - POI probes — parent.fromWorld(camera.pointOfInterest) for parented
+    //     2-node cameras / lights.
+    //   - Path probes — layer.toWorld([0,0,0]) for cam / light / null /
+    //     AVLayer when the matching dialog checkbox is on, so we can emit
+    //     a static BasisCurves trajectory under AE_Scene.
+    // All probes live for the sampling phase only and are removed before
+    // the next phase; the whole pass is wrapped in one undo group so
+    // Cmd-Z reverts cleanly if anything errors out.
+    function shouldEmitPath(nfo) {
+        if (nfo.isCam)   return emitPathCam;
+        if (nfo.isLight) return emitPathLight;
+        if (nfo.isAV3D) {
+            var isNull = false;
+            try { isNull = !!nfo.layer.nullLayer; } catch (e) {}
+            return isNull ? emitPathNull : emitPathAV;
+        }
+        return false;
+    }
+    var anyProbeNeeded = false;
+    for (var li0 = 0; li0 < layerInfos.length; li0++) {
+        var nfo0 = layerInfos[li0];
+        if ((nfo0.isCam || nfo0.isLight) || shouldEmitPath(nfo0)) {
+            anyProbeNeeded = true; break;
+        }
+    }
+    if (anyProbeNeeded) app.beginUndoGroup("AE USD Exporter — sample (probes)");
+
     for (var li = 0; li < layerInfos.length; li++) {
         var nfo   = layerInfos[li];
         var layer = nfo.layer;
@@ -842,8 +1556,26 @@
         // which breaks shading on import.
         nfo.use2Node = (nfo.isCam || nfo.isLight) ? is2NodeCamera(layer) : false;
 
+        // For parented 2-node cameras / lights, build a POI probe that
+        // evaluates parent.fromWorld(camera.pointOfInterest) per frame —
+        // ExtendScript can't call fromWorld directly so we route through an
+        // expression null.  Probe is removed below after sampling completes.
+        var poiProbe = null;
+        if (nfo.use2Node && layer.parent) {
+            poiProbe = createPoiProbe(layer, nfo.primName);
+        }
+        // Path probe — toWorld([0,0,0]) gives the layer's world-space origin;
+        // we sample once per frame and emit a BasisCurves trajectory under
+        // AE_Scene so animated paths are visible in Houdini.  Gated by the
+        // per-type checkboxes (cam / light / null / AVLayer).
+        var pathProbe = null;
+        if (shouldEmitPath(nfo)) {
+            pathProbe = createWorldPathProbe(layer, nfo.primName);
+        }
+
         // mS[i] = [frame, m00..m22, tx, ty, tz]  (9 rotation + 3 translation values)
-        var mS=[], flS=[], fdS=[], intS=[], colS=[], caS=[], cfS=[];
+        // pathS[i] = [frame, wx, wy, wz]          (cam/light world-space origin)
+        var mS=[], flS=[], fdS=[], intS=[], colS=[], caS=[], cfS=[], pathS=[];
 
         for (var frame = startFrame; frame <= endFrame; frame++) {
             var t = frame / fps;
@@ -868,15 +1600,19 @@
             var rp = readRot(layer, t);
             var Rae;
             if (nfo.use2Node) {
-                var poi = [rawPos[0], rawPos[1], rawPos[2]];
-                try { poi = layer.pointOfInterest.valueAtTime(t, false); } catch(e) {}
-                // pointOfInterest is in WORLD (comp) space, but position is
-                // in PARENT space.  If the camera/light has a parent, convert
-                // POI into the parent's local space so the lookAt math
-                // composes correctly.  Without this, a parented camera with
-                // an animated parent yields a rotation that mixes spaces.
-                if (layer.parent) {
-                    try { poi = layer.parent.fromWorld(poi, t); } catch (e) {}
+                var poi;
+                if (poiProbe) {
+                    // Probe null reads parent-local POI via expression — works
+                    // when both camera AND parent animate; ExtendScript's own
+                    // Layer.fromWorld is undefined here.
+                    try { poi = poiProbe.position.valueAtTime(t, false); }
+                    catch (e) { poi = null; }
+                }
+                if (!poi) {
+                    // No probe (root-parented / probe creation failed): POI is
+                    // already in the right space (world == parent for roots).
+                    try { poi = layer.pointOfInterest.valueAtTime(t, false); }
+                    catch (e) { poi = [rawPos[0], rawPos[1], rawPos[2]]; }
                 }
                 Rae = m3mul(lookAtMatrix(rawPos, poi),
                             aeRotMatrix(rp.ori, rp.xr, rp.yr, rp.zr));
@@ -900,13 +1636,30 @@
                 } catch(e) {}
             }
 
-            // Build 3×3 with scale baked in (scale columns of rotation matrix)
+            // Build 3×3 with scale baked in.  USD's xformOp:transform is
+            // row-vector (post-multiply), so the bilateral conjugation
+            // converts AE's column-vector R*S to row-vector S*R_usd_row,
+            // i.e. row i is scaled by s_i — NOT column j by s_j.  Uniform
+            // scale produces identical numbers either way, but non-uniform
+            // and negative scale only land correctly with row scaling.
             mS.push([frame,
-                Rusd[0][0]*sx, Rusd[0][1]*sy, Rusd[0][2]*sz,
-                Rusd[1][0]*sx, Rusd[1][1]*sy, Rusd[1][2]*sz,
-                Rusd[2][0]*sx, Rusd[2][1]*sy, Rusd[2][2]*sz,
+                Rusd[0][0]*sx, Rusd[0][1]*sx, Rusd[0][2]*sx,
+                Rusd[1][0]*sy, Rusd[1][1]*sy, Rusd[1][2]*sy,
+                Rusd[2][0]*sz, Rusd[2][1]*sz, Rusd[2][2]*sz,
                 tx, ty, tz
             ]);
+
+            // World-space path sample for animated-trajectory BasisCurves.
+            // Stored in AE comp pixel coords (sign-flip + scale conversion
+            // happens at emit time, matching the regular position pipeline).
+            if (pathProbe) {
+                try {
+                    var wp = pathProbe.position.valueAtTime(t, false);
+                    pathS.push([frame, wp[0],
+                        (wp.length > 1 ? wp[1] : 0),
+                        (wp.length > 2 ? wp[2] : 0)]);
+                } catch (e) {}
+            }
 
             // Camera
             if (nfo.isCam) {
@@ -949,7 +1702,13 @@
 
         nfo.mS=mS; nfo.flS=flS; nfo.fdS=fdS;
         nfo.intS=intS; nfo.colS=colS; nfo.caS=caS; nfo.cfS=cfS;
+        nfo.pathS = pathS;
+
+        if (poiProbe)  { try { poiProbe.remove();  } catch (e) {} }
+        if (pathProbe) { try { pathProbe.remove(); } catch (e) {} }
     }
+
+    if (anyProbeNeeded) app.endUndoGroup();
 
     // ── Build USD ASCII document ──────────────────────────────────────────
     var I1 = "    ";
@@ -992,6 +1751,19 @@
     for (var ri = 0; ri < roots.length; ri++) {
         out.push('');
         writePrim(roots[ri], I1);
+    }
+
+    // Animation paths — sibling BasisCurves prims under AE_Scene, one per
+    // animated layer whose type checkbox is on.  Static paths skipped
+    // (single-position trajectories aren't useful and 1-vertex curves
+    // render as nothing).
+    for (var pli = 0; pli < layerInfos.length; pli++) {
+        var pNfo = layerInfos[pli];
+        if (!shouldEmitPath(pNfo)) continue;
+        if (!pNfo.pathS || pNfo.pathS.length < 2) continue;
+        if (isStaticSamples(pNfo.pathS, 3)) continue;
+        out.push('');
+        writePathCurve(out, I1, pNfo);
     }
 
     out.push('}');
@@ -1258,20 +2030,22 @@
         arr.push(ind + '}');
     }
 
-    // Bounding-box quad mesh — used by text and shape layers, where the
-    // "geometry" varies per frame and isn't a simple width × height.  AE's
-    // sourceRectAtTime gives us {left, top, width, height} relative to
-    // the anchor point, so the corners are already anchor-relative.
-    // Sampled at the export start frame; if the layer's bounds animate,
-    // the mesh stays at that snapshot (transform animation still applies).
+    // Bounding-box quad mesh — fallback for text / shape layers when
+    // vector reconstruction failed (no Path data, no "Create Shapes from
+    // Text" command available, etc.).  Points are anchor-shifted so
+    // rotation / scale pivot at the AE anchor (matches writeSolidGeo /
+    // writeFootageGeo).  Sampled at the export start frame.
     function writeBoundsGeo(arr, ind, nfo, color) {
         var rect;
         try { rect = nfo.layer.sourceRectAtTime(startFrame / fps, false); }
         catch (e) { return; }
         if (!rect || rect.width <= 0 || rect.height <= 0) return;
 
-        var L = rect.left, T = rect.top;
-        var R = L + rect.width, B = T + rect.height;
+        var anchor = [0, 0, 0];
+        try { anchor = nfo.layer.anchorPoint.value; } catch (e) {}
+
+        var L = rect.left  - anchor[0], T = rect.top   - anchor[1];
+        var R = L + rect.width,         B = T + rect.height;
         var c = color || [0.5, 0.5, 0.5];
 
         function toUsd(x, y) {
@@ -1290,11 +2064,193 @@
         arr.push(ind + '}');
     }
 
-    // Text layer → bounding-box quad coloured with the text's fill colour.
-    // Real glyph geometry would mean tessellating fonts, which is out of
-    // scope; the bounding box gives correct placement and a useful colour
-    // proxy for relighting / compositing.
+    // Builds per-frame mesh data: point strings (anchor-shifted, AE→USD
+    // Y-flipped), per-face vertex counts, vertex indices, and the first
+    // fill colour found.  Returns null when nothing useful triangulated.
+    function buildMeshSnapshot(paths, anchor) {
+        var pointStrs = [], faceCounts = [], faceIndices = [];
+        var displayColor = [0.5, 0.5, 0.5], foundColor = false;
+        var vertCount = 0;
+
+        for (var pi = 0; pi < paths.length; pi++) {
+            var p = paths[pi];
+            if (!p.poly) continue;
+            var poly = dedupAdjacent(p.poly);
+            if (poly.length < 3) continue;
+            var tris = earClipTriangulate(poly);
+            if (!tris.length) continue;
+            var startIdx = vertCount;
+            for (var v = 0; v < poly.length; v++) {
+                var ux = (poly[v][0] - anchor[0]) / scale;
+                var uy = -(poly[v][1] - anchor[1]) / scale;
+                pointStrs.push('(' + fmt(ux) + ', ' + fmt(uy) + ', 0)');
+                vertCount++;
+            }
+            for (var ti = 0; ti < tris.length; ti++) {
+                faceCounts.push(3);
+                faceIndices.push(startIdx + tris[ti][0]);
+                faceIndices.push(startIdx + tris[ti][1]);
+                faceIndices.push(startIdx + tris[ti][2]);
+            }
+            if (!foundColor && p.color) {
+                displayColor = [p.color[0], p.color[1], p.color[2]];
+                foundColor = true;
+            }
+        }
+        if (!pointStrs.length) return null;
+        return {
+            pointStrs:    pointStrs,
+            faceCounts:   faceCounts,
+            faceIndices:  faceIndices,
+            displayColor: displayColor
+        };
+    }
+
+    // Vector mesh — emits a real triangulated USD Mesh from extracted shape
+    // paths (each path = closed polyline + fill colour).  Anchor-shifts the
+    // points so AE's rotation/scale pivot lines up.  AE Y-down → USD Y-up.
+    // First fill colour wins for displayColor (USD Mesh has one displayColor
+    // per prim; per-path colour would need separate sub-prims).
+    function writeVectorMesh(arr, ind, nfo, paths) {
+        var anchor = [0, 0, 0];
+        try { anchor = nfo.layer.anchorPoint.value; } catch (e) {}
+
+        var snap = buildMeshSnapshot(paths, anchor);
+        if (!snap) return false;
+
+        var ind2 = ind + I1;
+        arr.push(ind + 'def Mesh "geo"');
+        arr.push(ind + '{');
+        arr.push(ind2 + 'point3f[] points = [' + snap.pointStrs.join(', ') + ']');
+        arr.push(ind2 + 'int[] faceVertexCounts = [' + snap.faceCounts.join(', ') + ']');
+        arr.push(ind2 + 'int[] faceVertexIndices = [' + snap.faceIndices.join(', ') + ']');
+        arr.push(ind2 + 'bool doubleSided = 1');
+        arr.push(ind2 + 'color3f[] primvars:displayColor = [(' +
+            fmt(snap.displayColor[0]) + ', ' + fmt(snap.displayColor[1]) + ', ' + fmt(snap.displayColor[2]) + ')]');
+        arr.push(ind + '}');
+        return true;
+    }
+
+    // Animated vector mesh — emits a Mesh whose points (and, if vertex count
+    // changes between frames, faceVertexCounts/Indices too) animate.  Used
+    // when text content keyframes or per-character animators were detected.
+    // Static topology + animated points is the cheap path; animated topology
+    // is the fallback when characters appear/disappear (USD allows it but
+    // some viewers may not interpolate nicely — acceptable for layout
+    // preview).  Consecutive identical samples are dropped to keep file size
+    // manageable on long-held animations.
+    function writeAnimatedVectorMesh(arr, ind, nfo, framedPaths) {
+        var anchor = [0, 0, 0];
+        try { anchor = nfo.layer.anchorPoint.value; } catch (e) {}
+
+        var samples = [];   // [{ frame, snap }]
+        for (var fi = 0; fi < framedPaths.length; fi++) {
+            var snap = buildMeshSnapshot(framedPaths[fi].paths, anchor);
+            if (snap) samples.push({ frame: framedPaths[fi].frame, snap: snap });
+        }
+        if (!samples.length) return false;
+
+        // Are vertex count + face indices identical across all frames?
+        // If so we only need to animate the points string.
+        var topoConstant = true;
+        var first = samples[0].snap;
+        for (var si = 1; si < samples.length; si++) {
+            var s = samples[si].snap;
+            if (s.pointStrs.length   !== first.pointStrs.length ||
+                s.faceCounts.length  !== first.faceCounts.length ||
+                s.faceIndices.length !== first.faceIndices.length) {
+                topoConstant = false; break;
+            }
+            for (var k = 0; k < s.faceIndices.length; k++) {
+                if (s.faceIndices[k] !== first.faceIndices[k]) { topoConstant = false; break; }
+            }
+            if (!topoConstant) break;
+            for (var k2 = 0; k2 < s.faceCounts.length; k2++) {
+                if (s.faceCounts[k2] !== first.faceCounts[k2]) { topoConstant = false; break; }
+            }
+            if (!topoConstant) break;
+        }
+
+        // Drop interior of held runs (matches the dedupSamples optimisation
+        // we use for matrix4d / scalar / colour timeSamples).
+        function dedupRuns(samples, equal) {
+            if (samples.length <= 2) return samples;
+            var out = [samples[0]];
+            for (var i = 1; i < samples.length - 1; i++) {
+                if (!equal(samples[i].snap, samples[i-1].snap) ||
+                    !equal(samples[i].snap, samples[i+1].snap)) {
+                    out.push(samples[i]);
+                }
+            }
+            out.push(samples[samples.length - 1]);
+            return out;
+        }
+        function pointsEqual(a, b) {
+            if (a.pointStrs.length !== b.pointStrs.length) return false;
+            for (var i = 0; i < a.pointStrs.length; i++) {
+                if (a.pointStrs[i] !== b.pointStrs[i]) return false;
+            }
+            return true;
+        }
+        function fullEqual(a, b) {
+            if (!pointsEqual(a, b)) return false;
+            if (a.faceCounts.length !== b.faceCounts.length ||
+                a.faceIndices.length !== b.faceIndices.length) return false;
+            for (var i = 0; i < a.faceCounts.length; i++) if (a.faceCounts[i] !== b.faceCounts[i]) return false;
+            for (var j = 0; j < a.faceIndices.length; j++) if (a.faceIndices[j] !== b.faceIndices[j]) return false;
+            return true;
+        }
+        var keys = topoConstant ? dedupRuns(samples, pointsEqual) : dedupRuns(samples, fullEqual);
+        var displayColor = samples[0].snap.displayColor;
+
+        var ind2 = ind + I1;
+        arr.push(ind + 'def Mesh "geo"');
+        arr.push(ind + '{');
+        if (topoConstant) {
+            arr.push(ind2 + 'point3f[] points.timeSamples = {');
+            for (var ki = 0; ki < keys.length; ki++) {
+                arr.push(ind2 + '    ' + keys[ki].frame + ': [' + keys[ki].snap.pointStrs.join(', ') + '],');
+            }
+            arr.push(ind2 + '}');
+            arr.push(ind2 + 'int[] faceVertexCounts = [' + first.faceCounts.join(', ') + ']');
+            arr.push(ind2 + 'int[] faceVertexIndices = [' + first.faceIndices.join(', ') + ']');
+        } else {
+            arr.push(ind2 + 'point3f[] points.timeSamples = {');
+            for (var ki2 = 0; ki2 < keys.length; ki2++) {
+                arr.push(ind2 + '    ' + keys[ki2].frame + ': [' + keys[ki2].snap.pointStrs.join(', ') + '],');
+            }
+            arr.push(ind2 + '}');
+            arr.push(ind2 + 'int[] faceVertexCounts.timeSamples = {');
+            for (var ki3 = 0; ki3 < keys.length; ki3++) {
+                arr.push(ind2 + '    ' + keys[ki3].frame + ': [' + keys[ki3].snap.faceCounts.join(', ') + '],');
+            }
+            arr.push(ind2 + '}');
+            arr.push(ind2 + 'int[] faceVertexIndices.timeSamples = {');
+            for (var ki4 = 0; ki4 < keys.length; ki4++) {
+                arr.push(ind2 + '    ' + keys[ki4].frame + ': [' + keys[ki4].snap.faceIndices.join(', ') + '],');
+            }
+            arr.push(ind2 + '}');
+        }
+        arr.push(ind2 + 'bool doubleSided = 1');
+        arr.push(ind2 + 'color3f[] primvars:displayColor = [(' +
+            fmt(displayColor[0]) + ', ' + fmt(displayColor[1]) + ', ' + fmt(displayColor[2]) + ')]');
+        arr.push(ind + '}');
+        return true;
+    }
+
+    // Text layer → triangulated glyph outlines via "Create Shapes from Text".
+    // Animated text (sourceText keys / range-selector animators) gets
+    // per-frame extraction and time-sampled mesh data; static text falls
+    // through to the cheap single-snapshot path.  Last-resort fallback:
+    // bounding-box quad coloured with the text's fill colour.
+    // Polygons-with-holes (letter "O") render filled as a v1 limit.
     function writeTextGeo(arr, ind, nfo) {
+        if (nfo.extractedPathsByFrame && nfo.extractedPathsByFrame.length) {
+            if (writeAnimatedVectorMesh(arr, ind, nfo, nfo.extractedPathsByFrame)) return;
+        }
+        if (nfo.extractedPaths && nfo.extractedPaths.length) {
+            if (writeVectorMesh(arr, ind, nfo, nfo.extractedPaths)) return;
+        }
         var c = [1, 1, 1];
         try {
             var td = nfo.layer.text.sourceText.valueAtTime(startFrame / fps, false);
@@ -1303,12 +2259,14 @@
         writeBoundsGeo(arr, ind, nfo, c);
     }
 
-    // Shape layer → bounding-box quad coloured with the first solid Fill
-    // found in the layer's contents tree.  Strokes, gradients, and merge-
-    // path operators aren't tessellated — would need real path → polygon
-    // conversion to reproduce the shape proper.  For most production use
-    // (overlays, lower-thirds), the bounding box plus colour is enough.
+    // Shape layer → triangulated outline of every Path / Rect / Ellipse
+    // primitive in the layer's "Contents" tree.  Falls back to a bbox quad
+    // coloured with the first Fill when no paths could be extracted (e.g.
+    // a Star primitive, or a stroke-only / repeater-only layer).
     function writeShapeGeo(arr, ind, nfo) {
+        if (nfo.extractedPaths && nfo.extractedPaths.length) {
+            if (writeVectorMesh(arr, ind, nfo, nfo.extractedPaths)) return;
+        }
         var c = [0.5, 0.5, 0.5];
         try {
             var found = findFirstFill(nfo.layer.property("Contents"));
@@ -1334,6 +2292,65 @@
             }
         }
         return null;
+    }
+
+    // Animated layer → linear BasisCurves trajectory.  Points are the layer's
+    // per-frame world-space origin (from the path probe), so the curve is
+    // static in world space — no further xform inside this prim.  Useful
+    // as a layout / motion-tracking reference in Houdini; not meant for
+    // rendering (renderable curves would need widths matched to scene scale).
+    // Per-type displayColor: cam = yellow, light = orange, null = cyan,
+    // AVLayer = green — easy to spot in the viewport.
+    function writePathCurve(arr, ind, nfo) {
+        if (!nfo.pathS || nfo.pathS.length < 2) return;
+        var ind2 = ind + I1;
+        var ind3 = ind2 + I1;
+
+        // Convert probe samples (AE comp px) → AE_Scene-local USD coords.
+        // Same sign-flip + scale conversion as the regular position pipeline,
+        // so a curve point lines up with the layer's xform translation when
+        // the layer was unparented (and stays correct under nesting).
+        var pts = [];
+        for (var i = 0; i < nfo.pathS.length; i++) {
+            var s = nfo.pathS[i];
+            var ux =  s[1] / scale;
+            var uy = -s[2] / scale;
+            var uz = -s[3] / scale;
+            pts.push('(' + fmt(ux) + ', ' + fmt(uy) + ', ' + fmt(uz) + ')');
+        }
+
+        var col, label;
+        if (nfo.isCam) {
+            col = [1.0, 0.95, 0.2];   label = 'Camera path';
+        } else if (nfo.isLight) {
+            col = [1.0, 0.55, 0.15];  label = 'Light path';
+        } else {
+            var isNull = false;
+            try { isNull = !!nfo.layer.nullLayer; } catch (e) {}
+            if (isNull) {
+                col = [0.2, 0.85, 1.0];  label = 'Null path';
+            } else {
+                col = [0.4, 1.0, 0.35];  label = 'Layer path';
+            }
+        }
+
+        arr.push(ind + 'def BasisCurves "' + nfo.primName + '_path" (');
+        arr.push(ind2 + 'doc = "' + esc(nfo.layer.name) + '  [' + label + ']"');
+        arr.push(ind + ')');
+        arr.push(ind + '{');
+        arr.push(ind2 + 'uniform token type = "linear"');
+        arr.push(ind2 + 'int[] curveVertexCounts = [' + pts.length + ']');
+        arr.push(ind2 + 'point3f[] points = [' + pts.join(', ') + ']');
+        // 1cm widths so the curve renders as a thin tube in viewports that
+        // honour widths; renderers without curve support fall back to lines.
+        var widths = [];
+        for (var w = 0; w < pts.length; w++) widths.push('0.01');
+        arr.push(ind2 + 'float[] widths = [' + widths.join(', ') + '] (');
+        arr.push(ind3 + 'interpolation = "vertex"');
+        arr.push(ind2 + ')');
+        arr.push(ind2 + 'color3f[] primvars:displayColor = [(' +
+            fmt(col[0]) + ', ' + fmt(col[1]) + ', ' + fmt(col[2]) + ')]');
+        arr.push(ind + '}');
     }
 
     // Layer in/out points → USD visibility.  No emission if the layer is
