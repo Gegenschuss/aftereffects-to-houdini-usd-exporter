@@ -147,7 +147,7 @@
     }
 
     // ── Dialog ────────────────────────────────────────────────────────────
-    var BUILD_DATE = "260429ag";  // bump on each meaningful change (YYMMDD)
+    var BUILD_DATE = "260429aw";  // bump on each meaningful change (YYMMDD)
     var dlg = new Window("dialog", "AE → Houdini USD Exporter");
     dlg.orientation = "column";
     dlg.alignChildren = ["fill", "top"];
@@ -288,8 +288,6 @@
     hintWarn.graphics.foregroundColor =
         hintWarn.graphics.newPen(hintWarn.graphics.PenType.SOLID_COLOR, [0.55, 0.55, 0.55, 1], 1);
 
-    dlg.add("panel");
-
     // Frame range inline
     var grpRange = dlg.add("group");
     grpRange.alignChildren = ["left", "center"];
@@ -302,23 +300,82 @@
     rbWork.value   = (savedRange === "work");
     rbFull.value   = (savedRange === "full");
 
-    var chkVisible = dlg.add("checkbox", undefined, "Visible only");
-    chkVisible.value = (loadPref("visibleOnly", "1") === "1");
+    var grpFlags = dlg.add("group");
+    grpFlags.alignChildren = ["left", "center"];
+    var chkVisible        = grpFlags.add("checkbox", undefined, "Visible only");
+    var chkExpandPrecomps = grpFlags.add("checkbox", undefined, "Expand precomps");
+    chkVisible       .value = (loadPref("visibleOnly",     "1") === "1");
+    chkExpandPrecomps.value = (loadPref("expandPrecomps",  "0") === "1");
+
+    // Per-type export filter — uncheck a category to skip those layers
+    // entirely (handy for camera-only / null-only quick exports).  All
+    // four default on so the export covers everything visible to AE.
+    // Fixed widths so the Export + Animation paths rows below line up
+    // column-by-column ("Cameras" sits over "Cameras", etc.).
+    var LBL_W = 110, COL_W = 110;
+    var grpExport = dlg.add("group");
+    grpExport.alignChildren = ["left", "center"];
+    var lblExport = grpExport.add("statictext", undefined, "Export:");
+    lblExport.preferredSize.width = LBL_W;
+    var chkExpCam   = grpExport.add("checkbox", undefined, "Cameras");
+    var chkExpLight = grpExport.add("checkbox", undefined, "Lights");
+    var chkExpNull  = grpExport.add("checkbox", undefined, "Nulls");
+    var chkExpAV    = grpExport.add("checkbox", undefined, "Other 3D layers");
+    chkExpCam  .preferredSize.width = COL_W;
+    chkExpLight.preferredSize.width = COL_W;
+    chkExpNull .preferredSize.width = COL_W;
+    chkExpAV   .preferredSize.width = COL_W;
+    chkExpCam  .value = (loadPref("expCam",   "1") === "1");
+    chkExpLight.value = (loadPref("expLight", "1") === "1");
+    chkExpNull .value = (loadPref("expNull",  "1") === "1");
+    chkExpAV   .value = (loadPref("expAV",    "1") === "1");
 
     // Per-type animation-path checkboxes — emit a sibling BasisCurves
     // trajectory for each animated layer of the chosen kind.  All default
-    // off; user opts in per type when paths are wanted.
+    // off; user opts in per type when paths are wanted.  Sits right under
+    // the Export row so the per-type matchup (Cameras / Lights / Nulls /
+    // Other 3D layers) reads visually as a sub-option.
     var grpPaths = dlg.add("group");
     grpPaths.alignChildren = ["left", "center"];
-    grpPaths.add("statictext", undefined, "Animation paths:");
+    var lblPaths = grpPaths.add("statictext", undefined, "Animation paths:");
+    lblPaths.preferredSize.width = LBL_W;
     var chkPathCam   = grpPaths.add("checkbox", undefined, "Cameras");
     var chkPathLight = grpPaths.add("checkbox", undefined, "Lights");
     var chkPathNull  = grpPaths.add("checkbox", undefined, "Nulls");
-    var chkPathAV    = grpPaths.add("checkbox", undefined, "AV layers");
+    var chkPathAV    = grpPaths.add("checkbox", undefined, "Other 3D layers");
+    chkPathCam  .preferredSize.width = COL_W;
+    chkPathLight.preferredSize.width = COL_W;
+    chkPathNull .preferredSize.width = COL_W;
+    chkPathAV   .preferredSize.width = COL_W;
     chkPathCam  .value = (loadPref("pathsCam",   "0") === "1");
     chkPathLight.value = (loadPref("pathsLight", "0") === "1");
     chkPathNull .value = (loadPref("pathsNull",  "0") === "1");
     chkPathAV   .value = (loadPref("pathsAV",    "0") === "1");
+
+    // Text / shape geometry mode.  Plain-English labels: "Bounding box"
+    // swaps the triangulated outline for a 4-vert quad (much faster);
+    // "Animate text/shapes" toggles per-frame sampling on or off.  Layer
+    // position / rotation / scale animation is captured regardless — these
+    // checkboxes only affect glyph / path GEOMETRY animation.
+    var grpGeo = dlg.add("group");
+    grpGeo.alignChildren = ["left", "center"];
+    var lblGeo = grpGeo.add("statictext", undefined, "Text & Shape:");
+    lblGeo.preferredSize.width = LBL_W;
+    var chkBboxOnly  = grpGeo.add("checkbox", undefined, "Bounding box (faster)");
+    var chkBakeText  = grpGeo.add("checkbox", undefined, "Animate text");
+    var chkBakeShape = grpGeo.add("checkbox", undefined, "Animate shapes");
+    chkBboxOnly .value = (loadPref("bboxOnly",  "0") === "1");
+    chkBakeText .value = (loadPref("bakeText",  "0") === "1");
+    chkBakeShape.value = (loadPref("bakeShape", "0") === "1");
+
+    // Friendly hint — explains what "Animate" means in this context.
+    var geoHint = dlg.add("statictext", undefined,
+        "Animate = per-frame geometry; off = single snapshot at the start frame.  Layer position/rotation/scale always animates either way.",
+        { multiline: true });
+    geoHint.preferredSize.width = 460;
+    geoHint.graphics.font = ScriptUI.newFont("Helvetica", "ITALIC", 10);
+    geoHint.graphics.foregroundColor =
+        geoHint.graphics.newPen(geoHint.graphics.PenType.SOLID_COLOR, [0.55, 0.55, 0.55, 1], 1);
 
     var grpBtns = dlg.add("group");
     grpBtns.alignment = ["fill", "top"];
@@ -344,6 +401,14 @@
         chkPathLight.value = false;
         chkPathNull.value  = false;
         chkPathAV.value    = false;
+        chkBboxOnly.value  = false;
+        chkBakeText.value  = false;
+        chkBakeShape.value = false;
+        chkExpCam.value    = true;
+        chkExpLight.value  = true;
+        chkExpNull.value   = true;
+        chkExpAV.value     = true;
+        chkExpandPrecomps.value = false;
     };
 
     var outFile = null;
@@ -373,6 +438,14 @@
     var emitPathLight = chkPathLight.value;
     var emitPathNull  = chkPathNull.value;
     var emitPathAV    = chkPathAV.value;
+    var bboxOnly      = chkBboxOnly.value;
+    var bakeText      = chkBakeText.value;
+    var bakeShape     = chkBakeShape.value;
+    var expCam        = chkExpCam.value;
+    var expLight      = chkExpLight.value;
+    var expNull       = chkExpNull.value;
+    var expAV         = chkExpAV.value;
+    var expandPrecomps = chkExpandPrecomps.value;
 
     // Persist for next run.
     savePref("scale",       scaleInput.text);
@@ -385,6 +458,14 @@
     savePref("pathsLight",  chkPathLight.value ? "1" : "0");
     savePref("pathsNull",   chkPathNull.value  ? "1" : "0");
     savePref("pathsAV",     chkPathAV.value    ? "1" : "0");
+    savePref("bboxOnly",    chkBboxOnly.value  ? "1" : "0");
+    savePref("bakeText",    chkBakeText.value  ? "1" : "0");
+    savePref("bakeShape",   chkBakeShape.value ? "1" : "0");
+    savePref("expCam",         chkExpCam.value         ? "1" : "0");
+    savePref("expLight",       chkExpLight.value       ? "1" : "0");
+    savePref("expNull",        chkExpNull.value        ? "1" : "0");
+    savePref("expAV",          chkExpAV.value          ? "1" : "0");
+    savePref("expandPrecomps", chkExpandPrecomps.value ? "1" : "0");
 
     // ── Frame range ───────────────────────────────────────────────────────
     var fps = comp.frameRate;
@@ -432,6 +513,19 @@
         }
 
         if (!isCam && !isLight && !isAV3D) continue;
+
+        // Per-type export filter (dialog "Export:" row).  Cameras, lights,
+        // and nulls each have their own checkbox; everything else under
+        // isAV3D (solids, footage, text, shape) shares "Other 3D layers".
+        if (isCam   && !expCam)   continue;
+        if (isLight && !expLight) continue;
+        if (isAV3D) {
+            var isNullLayer = false;
+            try { isNullLayer = !!lyr.nullLayer; } catch (e) {}
+            if (isNullLayer && !expNull) continue;
+            if (!isNullLayer && !expAV)  continue;
+        }
+
         if (visibleOnly && !lyr.enabled)         continue;  // eyeball off
         if (visibleOnly && anySolo && !lyr.solo) continue;  // solo'd elsewhere
 
@@ -745,21 +839,119 @@
         return;
     }
 
+    // ── Expand precomps (cheap, time-stretch-ignoring) ────────────────────
+    // Each precomp layer becomes a parent USD Xform; its inner layers nest
+    // under it.  AE's position/rotation/scale on inner layers are evaluated
+    // at COMP TIME (no inner-time mapping for stretch/remap — known v1
+    // limitation flagged in the README).  Inner-comp layer.parent resolves
+    // via object-identity lookup since per-comp layer.index collides.
+    function expandPrecompInto(parentNfo, depth) {
+        if (depth > 16) return;   // safety cap on weird circular refs
+        var src;
+        try { src = parentNfo.layer.source; } catch (e) { return; }
+        if (!src || !(src instanceof CompItem)) return;
+        var innerComp = src;
+
+        var innerAnySolo = false;
+        for (var ss = 1; ss <= innerComp.numLayers; ss++) {
+            try { if (innerComp.layer(ss).solo) { innerAnySolo = true; break; } } catch (e) {}
+        }
+
+        for (var pi = 1; pi <= innerComp.numLayers; pi++) {
+            var lyrI = innerComp.layer(pi);
+            var iCam   = (lyrI instanceof CameraLayer);
+            var iLight = (lyrI instanceof LightLayer);
+            var iAV3D  = false;
+            if (!iCam && !iLight) {
+                try { iAV3D = !!lyrI.threeDLayer; } catch (e) {}
+            }
+            if (!iCam && !iLight && !iAV3D) continue;
+            if (iCam   && !expCam)   continue;
+            if (iLight && !expLight) continue;
+            if (iAV3D) {
+                var iIsNull = false;
+                try { iIsNull = !!lyrI.nullLayer; } catch (e) {}
+                if (iIsNull && !expNull) continue;
+                if (!iIsNull && !expAV)  continue;
+            }
+            if (visibleOnly && !lyrI.enabled) continue;
+            if (visibleOnly && innerAnySolo && !lyrI.solo) continue;
+
+            var iLT       = iLight ? lyrI.lightType : null;
+            var iSpot     = iLight && (iLT === LightType.SPOT);
+            var iAmbient  = iLight && (iLT === LightType.AMBIENT);
+            var iSolid = false, iFootage = false, iText = false, iShape = false;
+            try {
+                if (iAV3D && !lyrI.nullLayer) {
+                    iText  = isTextLayer(lyrI);
+                    iShape = isShapeLayer(lyrI);
+                    if (!iText && !iShape && lyrI.source && lyrI.source.mainSource) {
+                        iSolid   = (lyrI.source.mainSource instanceof SolidSource);
+                        iFootage = (lyrI.source.mainSource instanceof FileSource);
+                    }
+                }
+            } catch (e) {}
+
+            var innerNfo = {
+                layer:      lyrI,
+                isCam:      iCam,
+                isLight:    iLight,
+                isAV3D:     iAV3D,
+                isSpot:     iSpot,
+                isAmbient:  iAmbient,
+                isSolid:    iSolid,
+                isFootage:  iFootage,
+                isText:     iText,
+                isShape:    iShape,
+                usdType:    resolveUSDType(iCam, iLight, iLT),
+                subtype:    resolveSubtype(iCam, iLight, iLT, lyrI),
+                primName:   makePrimName(lyrI.name, usedPrimNames),
+                viaPrecomp: parentNfo
+            };
+            layerInfos.push(innerNfo);
+
+            // Recurse if this inner layer is itself a precomp.
+            if (lyrI.source && lyrI.source instanceof CompItem) {
+                expandPrecompInto(innerNfo, depth + 1);
+            }
+        }
+    }
+    if (expandPrecomps) {
+        // Snapshot top-level entries before the recursion mutates layerInfos.
+        var preExpansion = layerInfos.slice();
+        for (var ep = 0; ep < preExpansion.length; ep++) {
+            var nfoP = preExpansion[ep];
+            try {
+                if (nfoP.layer.source && nfoP.layer.source instanceof CompItem) {
+                    expandPrecompInto(nfoP, 0);
+                }
+            } catch (e) {}
+        }
+    }
+
     // ── Build parent/child tree (AE parents → nested USD Xforms) ──────────
     // AE's position/rotation/scale are LOCAL to the parent layer when parented,
     // so nesting in USD reproduces world-space correctly without baking.  Layers
     // whose AE parent is not exported (e.g. parented to an audio-only layer)
     // become roots and keep their parent-relative transform — a known limitation.
-    var byLayerIndex = {};
+    // Object-identity lookup (instead of layer.index) handles cross-comp
+    // collisions when expandPrecomps populated layerInfos with inner-comp
+    // entries that share index numbers with the active comp.
+    function findNfoByLayer(lyr) {
+        for (var fi = 0; fi < layerInfos.length; fi++) {
+            if (layerInfos[fi].layer === lyr) return layerInfos[fi];
+        }
+        return null;
+    }
     for (var hi = 0; hi < layerInfos.length; hi++) {
         layerInfos[hi].children = [];
-        byLayerIndex[layerInfos[hi].layer.index] = layerInfos[hi];
     }
     var roots = [];
     for (var hj = 0; hj < layerInfos.length; hj++) {
         var nfoJ   = layerInfos[hj];
         var pLayer = nfoJ.layer.parent;
-        var pNfo   = (pLayer && byLayerIndex[pLayer.index]) ? byLayerIndex[pLayer.index] : null;
+        var pNfo   = pLayer ? findNfoByLayer(pLayer) : null;
+        if (!pNfo && nfoJ.viaPrecomp) pNfo = nfoJ.viaPrecomp;
         if (pNfo) pNfo.children.push(nfoJ);
         else      roots.push(nfoJ);
     }
@@ -1109,8 +1301,30 @@
     }
 
     // Star / Polygon primitive.  Type 1 = polygon (N points around outer
-    // radius); Type 2 = star (2N points alternating inner/outer).  Roundness
-    // is approximated by zeroing out tangents — sharp points only in v1.
+    // radius); Type 2 = star (2N points alternating inner/outer).  Inner
+    // and outer Roundness (0–100%) round the corresponding vertices via
+    // cubic bezier tangents proportional to roundness × half-edge-length.
+    // Matches AE's visual behaviour closely; not bit-exact (Adobe doesn't
+    // publish their algorithm) but indistinguishable in typical sizes.
+    function readStarRoundness(starProp, kind, time) {
+        // Adobe's matchName has the long-standing typo "Roundess" (one 'n');
+        // we try the typo first, then the corrected spelling, then display
+        // names as last resort.
+        var names = (kind === "outer")
+            ? ["ADBE Vector Star Outer Roundess",
+               "ADBE Vector Star Outer Roundness",
+               "Outer Roundness"]
+            : ["ADBE Vector Star Inner Roundess",
+               "ADBE Vector Star Inner Roundness",
+               "Inner Roundness"];
+        for (var i = 0; i < names.length; i++) {
+            try {
+                var p = starProp.property(names[i]);
+                if (p) return p.valueAtTime(time, false);
+            } catch (e) {}
+        }
+        return 0;
+    }
     function makeStarShape(starProp, time) {
         var type = 2, n = 5, pos = [0, 0], rot = 0, outR = 100, innR = 50;
         try { type = starProp.property("ADBE Vector Star Type")        .valueAtTime(time, false); } catch (e) {}
@@ -1119,21 +1333,39 @@
         try { rot  = starProp.property("ADBE Vector Star Rotation")    .valueAtTime(time, false); } catch (e) {}
         try { outR = starProp.property("ADBE Vector Star Outer Radius").valueAtTime(time, false); } catch (e) {}
         try { innR = starProp.property("ADBE Vector Star Inner Radius").valueAtTime(time, false); } catch (e) {}
+        var outRound = readStarRoundness(starProp, "outer", time) || 0;
+        var innRound = readStarRoundness(starProp, "inner", time) || 0;
         n = Math.max(3, Math.round(n));
         var nVerts = (type === 2) ? n * 2 : n;
-        var verts = [], zeroT = [];
+        var verts = [];
         var step = (2 * Math.PI) / nVerts;
         var phase = (rot - 90) * Math.PI / 180;     // AE 0° points up; -90° offset
         for (var i = 0; i < nVerts; i++) {
             var theta = phase + i * step;
             var r = (type === 2 && (i % 2 === 1)) ? innR : outR;
             verts.push([pos[0] + r * Math.cos(theta), pos[1] + r * Math.sin(theta)]);
-            zeroT.push([0, 0]);
+        }
+        // Roundness 0 → sharp (zero tangents).  Roundness 100% with the
+        // bezier-circle constant 0.5523 puts each tangent at half the
+        // edge length, smoothly arcing the corner.
+        var inT = [], outT = [];
+        for (var i = 0; i < nVerts; i++) {
+            var prev = verts[(i - 1 + nVerts) % nVerts];
+            var next = verts[(i + 1) % nVerts];
+            var v    = verts[i];
+            var pdx = prev[0] - v[0], pdy = prev[1] - v[1];
+            var ndx = next[0] - v[0], ndy = next[1] - v[1];
+            var lenP = Math.sqrt(pdx*pdx + pdy*pdy);
+            var lenN = Math.sqrt(ndx*ndx + ndy*ndy);
+            var rPct = (type === 2 && (i % 2 === 1)) ? innRound : outRound;
+            var k    = (rPct / 100) * 0.5522847498;
+            inT .push(lenP > 1e-9 ? [(pdx / lenP) * lenP * 0.5 * k, (pdy / lenP) * lenP * 0.5 * k] : [0, 0]);
+            outT.push(lenN > 1e-9 ? [(ndx / lenN) * lenN * 0.5 * k, (ndy / lenN) * lenN * 0.5 * k] : [0, 0]);
         }
         return {
             vertices: verts,
-            inTangents: zeroT,
-            outTangents: zeroT.slice(),
+            inTangents:  inT,
+            outTangents: outT,
             closed: true
         };
     }
@@ -1171,6 +1403,34 @@
         }
         return col;
     }
+    function findStrokeColorValue(strokeProp, time) {
+        var col = null;
+        try {
+            var byMn = strokeProp.property("ADBE Vector Stroke Color");
+            if (byMn) col = byMn.valueAtTime(time, false);
+        } catch (e) {}
+        if (!col) {
+            try {
+                var byDn = strokeProp.property("Color");
+                if (byDn) col = byDn.valueAtTime(time, false);
+            } catch (e) {}
+        }
+        return col;
+    }
+    function findStrokeWidthValue(strokeProp, time) {
+        var w = null;
+        try {
+            var byMn = strokeProp.property("ADBE Vector Stroke Width");
+            if (byMn != null) w = byMn.valueAtTime(time, false);
+        } catch (e) {}
+        if (w == null) {
+            try {
+                var byDn = strokeProp.property("Stroke Width");
+                if (byDn != null) w = byDn.valueAtTime(time, false);
+            } catch (e) {}
+        }
+        return w;
+    }
     function findTransformGroup(vectorGroupContents) {
         try {
             for (var i = 1; i <= vectorGroupContents.numProperties; i++) {
@@ -1182,23 +1442,35 @@
     }
 
     // Walks layer.property("Contents") of a shape layer, applying each
-    // Vector Group's Transform stack and propagating Fill colour.  Returns
-    // an array of { poly, color, closed } where poly is in layer-local
-    // coords (NOT yet anchor-shifted — caller does that in writeVectorMesh).
+    // Vector Group's Transform stack and propagating Fill / Stroke state.
+    // Returns an array of { poly, color, closed, hasFill, hasStroke,
+    // strokeColor, strokeWidth } where poly is in layer-local coords
+    // (NOT yet anchor-shifted — caller does that in the geo writers).
     function extractShapePaths(layer, time) {
         var out = [];
         var contents;
         try { contents = layer.property("Contents"); } catch (e) { return out; }
         if (!contents || typeof contents.numProperties !== "number") return out;
-        walkVectorGroup(contents, identityM3x3(), [0.5, 0.5, 0.5], out, time);
+        var parentRender = {
+            fillColor:   [0.5, 0.5, 0.5], hasFill:   false,
+            strokeColor: [0.5, 0.5, 0.5], hasStroke: false,
+            strokeWidth: 2
+        };
+        walkVectorGroup(contents, identityM3x3(), parentRender, out, time);
         return out;
     }
 
-    function walkVectorGroup(groupProp, parentXform, parentColor, out, time) {
-        // First pass: pick up the local Transform Group (if any) and the
-        // first Fill (so nested shapes inherit it).
+    function walkVectorGroup(groupProp, parentXform, parentRender, out, time) {
+        // First pass: pick up the local Transform Group (if any) and any
+        // Fill / Stroke (so nested shapes inherit them).  Fill wins over
+        // parent fill, Stroke wins over parent stroke; absent siblings
+        // inherit the parent's value.
         var localXform = identityM3x3();
-        var color = parentColor;
+        var fillColor   = parentRender.fillColor;
+        var hasFill     = parentRender.hasFill;
+        var strokeColor = parentRender.strokeColor;
+        var hasStroke   = parentRender.hasStroke;
+        var strokeWidth = parentRender.strokeWidth;
         for (var i = 1; i <= groupProp.numProperties; i++) {
             var p;
             try { p = groupProp.property(i); } catch (e) { continue; }
@@ -1208,11 +1480,36 @@
             if (mn === "ADBE Vector Transform Group") {
                 localXform = readVectorTransform(p, time);
             } else if (mn === "ADBE Vector Graphic - Fill") {
-                var col = findFillColorValue(p, time);
-                if (col) color = [col[0], col[1], col[2]];
+                var fc = findFillColorValue(p, time);
+                if (fc) { fillColor = [fc[0], fc[1], fc[2]]; hasFill = true; }
+            } else if (mn === "ADBE Vector Graphic - Stroke") {
+                var sc = findStrokeColorValue(p, time);
+                if (sc) { strokeColor = [sc[0], sc[1], sc[2]]; hasStroke = true; }
+                var sw = findStrokeWidthValue(p, time);
+                if (sw != null) strokeWidth = sw;
             }
         }
         var fullXform = m3x3mul(parentXform, localXform);
+        var render = {
+            fillColor:   fillColor,   hasFill:   hasFill,
+            strokeColor: strokeColor, hasStroke: hasStroke,
+            strokeWidth: strokeWidth
+        };
+        // Each emitted path takes the fill colour when filled, stroke
+        // colour otherwise — matches what the user sees in AE.
+        var pathColor = hasFill ? fillColor : (hasStroke ? strokeColor : [0.5, 0.5, 0.5]);
+
+        function pushPath(poly, closed) {
+            out.push({
+                poly:        poly,
+                color:       pathColor,
+                closed:      closed,
+                hasFill:     hasFill,
+                hasStroke:   hasStroke,
+                strokeColor: strokeColor,
+                strokeWidth: strokeWidth
+            });
+        }
 
         // Second pass: recurse into Vector Groups, emit paths for shapes.
         for (var i = 1; i <= groupProp.numProperties; i++) {
@@ -1223,15 +1520,24 @@
             try { mn = p.matchName; } catch (e) { continue; }
 
             if (mn === "ADBE Vector Group") {
-                // Vector Group's Transform Group sits inside its Contents
-                // (alongside the shape primitives), so the recursive call
-                // picks it up via the first pass above.
+                // Vector Group's Transform Group is a SIBLING of Contents
+                // (not inside Contents), so we must read it at the VG level
+                // before recursing — otherwise VG translations / rotations
+                // are silently lost and shapes drawn at offsets to the
+                // layer origin collapse back to origin.
+                var vgXform = identityM3x3();
+                try {
+                    var vgTG = p.property("ADBE Vector Transform Group");
+                    if (vgTG) vgXform = readVectorTransform(vgTG, time);
+                } catch (e) {}
+                var combinedXform = m3x3mul(fullXform, vgXform);
+
                 var nested;
                 try { nested = p.property("Contents"); } catch (e) { continue; }
                 if (!nested) {
                     try { nested = p.property("ADBE Vectors Group"); } catch (e) {}
                 }
-                if (nested) walkVectorGroup(nested, fullXform, color, out, time);
+                if (nested) walkVectorGroup(nested, combinedXform, render, out, time);
 
             } else if (mn === "ADBE Vector Shape - Group") {
                 var pathProp = findShapePathProp(p);
@@ -1241,8 +1547,7 @@
                     if (shape && shape.vertices && shape.vertices.length >= 2) {
                         var poly = tessellatePath(shape, 8);
                         poly = transformPoints2D(poly, fullXform);
-                        out.push({ poly: poly, color: color,
-                                   closed: shape.closed !== false });
+                        pushPath(poly, shape.closed !== false);
                     }
                 } catch (e) {}
 
@@ -1251,7 +1556,7 @@
                 if (rs) {
                     var rp = tessellatePath(rs, 8);
                     rp = transformPoints2D(rp, fullXform);
-                    out.push({ poly: rp, color: color, closed: true });
+                    pushPath(rp, true);
                 }
 
             } else if (mn === "ADBE Vector Shape - Ellipse") {
@@ -1259,21 +1564,24 @@
                 if (es) {
                     var ep = tessellatePath(es, 12);
                     ep = transformPoints2D(ep, fullXform);
-                    out.push({ poly: ep, color: color, closed: true });
+                    pushPath(ep, true);
                 }
 
             } else if (mn === "ADBE Vector Shape - Star") {
                 var st = makeStarShape(p, time);
                 if (st) {
-                    var sp = tessellatePath(st, 1);   // sharp points, linear segs
+                    // 8 segs is enough for smooth roundness; with zero
+                    // tangents (sharp star), the segments collapse to a
+                    // single straight edge regardless.
+                    var sp = tessellatePath(st, 8);
                     sp = transformPoints2D(sp, fullXform);
-                    out.push({ poly: sp, color: color, closed: true });
+                    pushPath(sp, true);
                 }
 
             }
-            // Skipped: Stroke, Trim Paths, Merge Paths, Repeater,
-            // Pucker & Bloat, Wiggle Paths, etc.  Document in
-            // known-limitations if they end up biting users.
+            // Skipped: Trim Paths, Merge Paths, Repeater, Pucker & Bloat,
+            // Wiggle Paths, etc.  Document in known-limitations if they
+            // end up biting users.
         }
     }
 
@@ -1338,6 +1646,40 @@
         if (result.dup)   try { result.dup  .remove(); } catch (e) {}
     }
 
+    // Bbox-as-paths — fast fallback / explicit bbox-quad mode.  Returns a
+    // single 4-vertex closed "path" matching the layer's sourceRectAtTime
+    // bounds with the layer's fill colour.  Callable per-frame for animated
+    // bbox (cheap: just sourceRectAtTime + colour read; no AE-side mutation).
+    function extractBoundsAsPaths(layer, time, isText) {
+        var rect;
+        try { rect = layer.sourceRectAtTime(time, false); }
+        catch (e) { return []; }
+        if (!rect || rect.width <= 0 || rect.height <= 0) return [];
+        var L = rect.left, T = rect.top;
+        var R = L + rect.width, B = T + rect.height;
+        var color = [0.5, 0.5, 0.5];
+        if (isText) {
+            try {
+                var td = layer.text.sourceText.valueAtTime(time, false);
+                if (td && td.fillColor) color = [td.fillColor[0], td.fillColor[1], td.fillColor[2]];
+            } catch (e) {}
+        } else {
+            try {
+                var found = findFirstFill(layer.property("Contents"));
+                if (found) color = [found[0], found[1], found[2]];
+            } catch (e) {}
+        }
+        return [{
+            poly:        [[L, B], [R, B], [R, T], [L, T]],
+            color:       color,
+            closed:      true,
+            hasFill:     true,
+            hasStroke:   false,
+            strokeColor: [0.5, 0.5, 0.5],
+            strokeWidth: 2
+        }];
+    }
+
     // Detect whether a text layer's CONTENT animates (per-frame text changes).
     // Layer-level transform animation (position / rotation / scale on the
     // text layer itself) is captured by the matrix sampler regardless and
@@ -1358,6 +1700,44 @@
             if (ta && ta.numProperties > 0) return true;
         } catch (e) {}
         return false;
+    }
+
+    // Detect whether a shape layer's geometry animates (Path keyframes,
+    // animated Vector Group transform, parametric Rect/Ellipse/Star size
+    // or position keys, expressions on any of the above).  Recurses Contents
+    // because shape props are nested arbitrarily deep.  Layer-level
+    // position/rotation/scale animation is excluded — that's already handled
+    // by the matrix sampler and doesn't need per-frame mesh data.
+    function isShapeAnimated(shapeLayer) {
+        function isAnimatedProp(p) {
+            try {
+                if (p.numKeys && p.numKeys > 0) return true;
+            } catch (e) {}
+            try {
+                if (p.expressionEnabled && p.expression && p.expression.length > 0) return true;
+            } catch (e) {}
+            return false;
+        }
+        function walk(prop) {
+            if (!prop) return false;
+            try {
+                var n = prop.numProperties;
+                if (typeof n === "number") {
+                    for (var i = 1; i <= n; i++) {
+                        var sub;
+                        try { sub = prop.property(i); } catch (e) { continue; }
+                        if (!sub) continue;
+                        if (isAnimatedProp(sub)) return true;
+                        if (walk(sub)) return true;
+                    }
+                }
+            } catch (e) {}
+            return false;
+        }
+        try {
+            var root = shapeLayer.property("Contents");
+            return walk(root);
+        } catch (e) { return false; }
     }
 
     // POI-probe trick — `Layer.fromWorld()` isn't directly callable from
@@ -1438,6 +1818,81 @@
         catch(e) { return false; }
     }
 
+    // Progress palette — non-blocking ScriptUI window with status line,
+    // detail line, 0–100% bar, and a Cancel button.  Same shape as the
+    // ae-shot-roundtrip palette so the look matches across Gegenschuss
+    // tools.  We force `win.update()` on every state change so the palette
+    // (and Cancel button) stays responsive even when AE menu commands
+    // dominate the loop body — `win.update()` itself is cheap (~1ms),
+    // and the per-frame AE work that costs real time happens between
+    // updates anyway.
+    function makeProgressPanel() {
+        var win = null, statusTxt = null, detailTxt = null, bar = null;
+        var btnCancel = null, alive = false, cancelled = false;
+        try {
+            win = new Window("palette", "Gegenschuss · AE → Houdini USD Export",
+                             undefined, { resizeable: false });
+            win.orientation = "column";
+            win.alignChildren = ["fill", "top"];
+            win.margins = 14; win.spacing = 6;
+            win.preferredSize.width = 460;
+            statusTxt = win.add("statictext", undefined, "Starting export…");
+            statusTxt.alignment = ["fill", "top"];
+            detailTxt = win.add("statictext", undefined, " ");
+            detailTxt.alignment = ["fill", "top"];
+            bar = win.add("progressbar", undefined, 0, 100);
+            bar.preferredSize = [430, 8];
+            var btnGrp = win.add("group");
+            btnGrp.orientation = "row"; btnGrp.alignment = ["right", "top"];
+            btnCancel = btnGrp.add("button", undefined, "Cancel");
+            btnCancel.preferredSize = [90, 24];
+            btnCancel.onClick = function () {
+                cancelled = true;
+                try { btnCancel.text = "Cancelling…"; btnCancel.enabled = false; win.update(); } catch (e) {}
+            };
+            win.show();
+            alive = true;
+        } catch (e) { alive = false; }
+        return {
+            update: function (status, detail, pct) {
+                if (!alive) return;
+                try {
+                    var changed = false;
+                    if (typeof status === "string" && statusTxt.text !== status) {
+                        statusTxt.text = status; changed = true;
+                    }
+                    if (typeof detail === "string") {
+                        var d = detail.length ? detail : " ";
+                        if (detailTxt.text !== d) { detailTxt.text = d; changed = true; }
+                    }
+                    if (typeof pct === "number") {
+                        var v = Math.max(0, Math.min(100, pct));
+                        if (Math.abs(bar.value - v) > 0.01) { bar.value = v; changed = true; }
+                    }
+                    // Force redraw whenever something actually changed —
+                    // skip the no-op case so identical updates inside tight
+                    // loops don't stack pointless invalidation calls.
+                    if (changed) win.update();
+                } catch (e) {}
+            },
+            flush: function () { if (alive) try { win.update(); } catch (e) {} },
+            isCancelled: function () { return cancelled; },
+            close: function () {
+                if (!alive) return;
+                alive = false;
+                try { win.close(); } catch (e) {}
+            }
+        };
+    }
+    // No-op default so early-return paths before the real palette is created
+    // don't crash on progress.update / close / isCancelled calls.
+    var progress = {
+        update: function () {},
+        flush: function () {},
+        isCancelled: function () { return false; },
+        close: function () {}
+    };
+
     // 10-decimal format with -0 cleanup; trims trailing zeros for compactness.
     function fmt(n) {
         if (Math.abs(n) < 1e-12) return '0';
@@ -1448,6 +1903,13 @@
         s = s.replace(/\.$/, '');
         return s;
     }
+
+    // Open the live progress palette now — every long phase below feeds it.
+    // The export already passed every preflight; this palette stays up
+    // through extraction → sampling → write, then closes before the
+    // success dialog.
+    progress = makeProgressPanel();
+    progress.update("Preparing export…", layerInfos.length + " layer(s)", 1);
 
     // ── Pre-extract text + shape vertex paths ─────────────────────────────
     // Walks each shape layer's "Contents" tree and tessellates beziers into
@@ -1463,28 +1925,92 @@
             anyTextOrShape = true; break;
         }
     }
+    var nFramesTotal = endFrame - startFrame + 1;
+    var extractCancelled = false;
     if (anyTextOrShape) {
-        // Text routing through `Create Shapes from Text` is AE-side destructive
-        // (on a duplicate; original is preserved); match the 2D-flip / multi-
-        // shape preflights and gate behind ensureBackup so the user always
-        // has Cmd-Z + a versioned .aep to fall back on.  Falls through with
-        // bbox quad fallback if the user declines.
-        if (ensureBackup()) {
-            app.beginUndoGroup("AE USD Exporter — extract text/shape paths");
-            // Animated text needs comp.time bumped before each conversion
-            // (the menu command bakes the rendered text at currentTime); we
-            // restore comp.time after the loop.
+        // Bbox-only mode skips Create Shapes from Text entirely, so the
+        // versioned-backup gate (which exists to protect against the
+        // destructive menu command on a duplicate) is only required for
+        // full-vector mode.  Bbox extraction is just sourceRectAtTime
+        // calls + colour reads — non-destructive.
+        var needsBackup = !bboxOnly;
+        var mayProceed = !needsBackup || ensureBackup();
+        if (mayProceed) {
+            if (needsBackup) app.beginUndoGroup("AE USD Exporter — extract text/shape paths");
             var origCompTime = comp.time;
+
+            // Decide per layer whether we sample per-frame or once at the
+            // start frame.  Per-type bake flags pick which kinds of layers
+            // get the per-frame treatment; combined with animation-detect
+            // helpers, layers that aren't animated drop back to single-
+            // frame even when bake is on (cheaper, identical output).
+            // For bbox-only, animation detection is skipped — bbox can
+            // change for any reason, and the dedup pass collapses static
+            // ranges in the output anyway.
+            function shouldBake(nfo) {
+                var bakeOn = nfo.isText ? bakeText : bakeShape;
+                if (!bakeOn) return false;
+                if (bboxOnly) return true;
+                return nfo.isText ? isTextAnimated(nfo.layer)
+                                  : isShapeAnimated(nfo.layer);
+            }
+
+            // Estimate work units for the extract progress band (1–40%).
+            var extractUnitsTotal = 0, extractUnitsDone = 0;
+            for (var ee = 0; ee < layerInfos.length; ee++) {
+                var nE = layerInfos[ee];
+                if (!nE.isText && !nE.isShape) continue;
+                extractUnitsTotal += shouldBake(nE) ? nFramesTotal : 1;
+            }
+            function tickExtract(status, detail) {
+                var pct = 1 + 39 * (extractUnitsDone / Math.max(1, extractUnitsTotal));
+                progress.update(status, detail, pct);
+            }
+
             try {
                 for (var ext2 = 0; ext2 < layerInfos.length; ext2++) {
+                    if (progress.isCancelled()) { extractCancelled = true; break; }
                     var nfoX = layerInfos[ext2];
-                    if (nfoX.isText) {
-                        if (isTextAnimated(nfoX.layer)) {
-                            // Per-frame extraction.  Slow (one menu command
-                            // per frame per text layer), but the only way to
-                            // capture sourceText / range-selector animation.
+                    if (!nfoX.isText && !nfoX.isShape) continue;
+                    var isText = nfoX.isText, isShape = nfoX.isShape;
+                    var lblPos = "layer " + (ext2 + 1) + " of " + layerInfos.length +
+                                 ": " + nfoX.layer.name;
+                    var bake = shouldBake(nfoX);
+
+                    // ── BBOX MODE — fast, no destructive ops ──────────
+                    if (bboxOnly) {
+                        if (bake) {
+                            nfoX.extractedPathsByFrame = [];
+                            for (var fb = startFrame; fb <= endFrame; fb++) {
+                                if (progress.isCancelled()) { extractCancelled = true; break; }
+                                nfoX.extractedPathsByFrame.push({
+                                    frame: fb,
+                                    paths: extractBoundsAsPaths(nfoX.layer, fb / fps, isText)
+                                });
+                                extractUnitsDone++;
+                                tickExtract("Bbox quad (animated)",
+                                    lblPos + "  ·  frame " + (fb - startFrame + 1) + "/" + nFramesTotal);
+                            }
+                        } else {
+                            tickExtract("Bbox quad", lblPos);
+                            nfoX.extractedPaths = extractBoundsAsPaths(nfoX.layer, startFrame / fps, isText);
+                            extractUnitsDone++;
+                            tickExtract("Bbox quad", lblPos);
+                        }
+                        continue;
+                    }
+
+                    // ── FULL VECTOR MODE — Create Shapes from Text /
+                    //                       walkVectorGroup ─────────────
+                    if (isText) {
+                        if (bake) {
+                            // Per-frame: comp.time bump + Create Shapes
+                            // from Text per frame.  Slow but the only way
+                            // to capture sourceText / range-selector
+                            // animation in vector form.
                             nfoX.extractedPathsByFrame = [];
                             for (var f = startFrame; f <= endFrame; f++) {
+                                if (progress.isCancelled()) { extractCancelled = true; break; }
                                 var tF = f / fps;
                                 try { comp.time = tF; } catch (e) {}
                                 var convF = convertTextToShapes(nfoX.layer);
@@ -1493,9 +2019,12 @@
                                     : [];
                                 cleanupConvertedText(convF);
                                 nfoX.extractedPathsByFrame.push({ frame: f, paths: pathsF });
+                                extractUnitsDone++;
+                                tickExtract("Animated text → glyphs",
+                                    lblPos + "  ·  frame " + (f - startFrame + 1) + "/" + nFramesTotal);
                             }
                         } else {
-                            // Static text — single conversion at startFrame.
+                            tickExtract("Text → glyphs", lblPos);
                             var snapTime = startFrame / fps;
                             try { comp.time = snapTime; } catch (e) {}
                             var conv = convertTextToShapes(nfoX.layer);
@@ -1503,15 +2032,40 @@
                                 nfoX.extractedPaths = extractShapePaths(conv.shape, snapTime);
                             }
                             cleanupConvertedText(conv);
+                            extractUnitsDone++;
+                            tickExtract("Text → glyphs", lblPos);
                         }
-                    } else if (nfoX.isShape) {
-                        nfoX.extractedPaths = extractShapePaths(nfoX.layer, startFrame / fps);
+                    } else {
+                        // Shape layer.
+                        if (bake) {
+                            nfoX.extractedPathsByFrame = [];
+                            for (var fS = startFrame; fS <= endFrame; fS++) {
+                                if (progress.isCancelled()) { extractCancelled = true; break; }
+                                nfoX.extractedPathsByFrame.push({
+                                    frame: fS,
+                                    paths: extractShapePaths(nfoX.layer, fS / fps)
+                                });
+                                extractUnitsDone++;
+                                tickExtract("Animated shape → paths",
+                                    lblPos + "  ·  frame " + (fS - startFrame + 1) + "/" + nFramesTotal);
+                            }
+                        } else {
+                            tickExtract("Shape → paths", lblPos);
+                            nfoX.extractedPaths = extractShapePaths(nfoX.layer, startFrame / fps);
+                            extractUnitsDone++;
+                            tickExtract("Shape → paths", lblPos);
+                        }
                     }
                 }
             } catch (e) {}
             try { comp.time = origCompTime; } catch (e) {}
-            app.endUndoGroup();
+            if (needsBackup) app.endUndoGroup();
         }
+    }
+    if (extractCancelled) {
+        progress.close();
+        alert("Export cancelled — no USD file was written.");
+        return;
     }
 
     // ── Sample all frames ─────────────────────────────────────────────────
@@ -1544,7 +2098,14 @@
     }
     if (anyProbeNeeded) app.beginUndoGroup("AE USD Exporter — sample (probes)");
 
+    progress.update("Sampling transforms…",
+                    "0 of " + layerInfos.length + " layers", 40);
+    var sampleCancelled = false;
+    var totalSampleUnits = layerInfos.length * Math.max(1, nFramesTotal);
+    var sampleUnitsDone  = 0;
+
     for (var li = 0; li < layerInfos.length; li++) {
+        if (progress.isCancelled()) { sampleCancelled = true; break; }
         var nfo   = layerInfos[li];
         var layer = nfo.layer;
 
@@ -1577,7 +2138,13 @@
         // pathS[i] = [frame, wx, wy, wz]          (cam/light world-space origin)
         var mS=[], flS=[], fdS=[], intS=[], colS=[], caS=[], cfS=[], pathS=[];
 
+        var sampleLayerLbl = "layer " + (li + 1) + " of " + layerInfos.length +
+                             ": " + layer.name;
+        progress.update("Sampling transforms…", sampleLayerLbl,
+            40 + 50 * (sampleUnitsDone / Math.max(1, totalSampleUnits)));
+
         for (var frame = startFrame; frame <= endFrame; frame++) {
+            if (progress.isCancelled()) { sampleCancelled = true; break; }
             var t = frame / fps;
 
             // Position → USD world translation
@@ -1706,9 +2273,19 @@
 
         if (poiProbe)  { try { poiProbe.remove();  } catch (e) {} }
         if (pathProbe) { try { pathProbe.remove(); } catch (e) {} }
+
+        sampleUnitsDone += nFramesTotal;
+        progress.update(null,
+            (li + 1) + " of " + layerInfos.length + " layers (" + layer.name + ")",
+            40 + 50 * (sampleUnitsDone / Math.max(1, totalSampleUnits)));
     }
 
     if (anyProbeNeeded) app.endUndoGroup();
+    if (sampleCancelled) {
+        progress.close();
+        alert("Export cancelled — no USD file was written.");
+        return;
+    }
 
     // ── Build USD ASCII document ──────────────────────────────────────────
     var I1 = "    ";
@@ -1748,6 +2325,13 @@
         out.push(I1 + 'uniform token[] xformOpOrder = ["xformOp:translate"]');
     }
 
+    // Build phase fills the 90–95% band — `writePrim` ticks the progress
+    // bar once per prim during recursion, so deeply-parented hierarchies
+    // (one root, many animated descendants) advance smoothly instead of
+    // pinning at the root's percentage for the entire subtree.
+    progress.update("Building USD document…",
+        "0 of " + layerInfos.length + " prims", 90);
+    primsBuilt = 0;   // reset before the build loop (var hoisted at top)
     for (var ri = 0; ri < roots.length; ri++) {
         out.push('');
         writePrim(roots[ri], I1);
@@ -1778,10 +2362,13 @@
     // char, mangling anything above U+007F (e.g. U+00B7 "·" → raw byte 0xB7,
     // invalid UTF-8). Hand-encode to UTF-8 so AE layer names with accents,
     // umlauts, CJK etc. parse cleanly in USD/Houdini.
+    progress.update("Writing USD file…", outPath, 96);
     outFile.encoding = "binary";
     outFile.open("w");
     outFile.write(toUtf8Bytes(content));
     outFile.close();
+    progress.update("Done", outPath, 100);
+    progress.close();
 
     // ── Success confirmation ──────────────────────────────────────────────
     var nCams=0, nLights=0, nNulls=0, nSolidsX=0, nFootageX=0, nTextX=0,
@@ -1834,8 +2421,16 @@
 
     // Recursive prim writer — emits a `def` block at the given indent and
     // recurses into nfo.children with one extra level of indentation.
+    var primsBuilt;   // initialised right before the build loop runs
     function writePrim(nfo, ind) {
         var ind2 = ind + I1;
+        // Tick once per prim (incl. nested children), so deeply-parented
+        // animated layers don't pin the bar at the parent's percentage
+        // for the entire recursion.
+        primsBuilt++;
+        progress.update("Building USD document…",
+            "prim " + primsBuilt + " of " + layerInfos.length + ": " + nfo.layer.name,
+            90 + 5 * (primsBuilt / Math.max(1, layerInfos.length)));
 
         var camNote = nfo.isCam
             ? '  cam:' + (nfo.use2Node ? '2-node' : '1-node') + '(auto)' : '';
@@ -2259,13 +2854,33 @@
         writeBoundsGeo(arr, ind, nfo, c);
     }
 
-    // Shape layer → triangulated outline of every Path / Rect / Ellipse
-    // primitive in the layer's "Contents" tree.  Falls back to a bbox quad
-    // coloured with the first Fill when no paths could be extracted (e.g.
-    // a Star primitive, or a stroke-only / repeater-only layer).
+    // Shape layer → triangulated outline of every Path / Rect / Ellipse /
+    // Star primitive in the layer's "Contents" tree.  Filled paths become
+    // a USD Mesh; stroke-only paths become a sibling BasisCurves so line
+    // art / outlines round-trip too.  Animated shapes (keyframed paths,
+    // animated Vector Group transform, expression-driven primitives) emit
+    // timeSampled mesh data; static shapes use the cheap single-snapshot
+    // path.  Falls back to a bbox quad coloured with the first Fill when
+    // no paths could be extracted.
     function writeShapeGeo(arr, ind, nfo) {
+        if (nfo.extractedPathsByFrame && nfo.extractedPathsByFrame.length) {
+            if (writeAnimatedVectorMesh(arr, ind, nfo, nfo.extractedPathsByFrame)) return;
+        }
         if (nfo.extractedPaths && nfo.extractedPaths.length) {
-            if (writeVectorMesh(arr, ind, nfo, nfo.extractedPaths)) return;
+            // Split into fill paths (→ Mesh) and stroke-only paths
+            // (→ BasisCurves).  Paths with both Fill AND Stroke render as
+            // Mesh — the stroke is decoration in AE; the silhouette is
+            // what survives as USD geometry.
+            var fillPaths = [], strokePaths = [];
+            for (var i = 0; i < nfo.extractedPaths.length; i++) {
+                var p = nfo.extractedPaths[i];
+                if (p.hasFill) fillPaths.push(p);
+                else if (p.hasStroke) strokePaths.push(p);
+            }
+            var emittedAny = false;
+            if (fillPaths.length && writeVectorMesh(arr, ind, nfo, fillPaths)) emittedAny = true;
+            if (strokePaths.length && writeStrokeCurves(arr, ind, nfo, strokePaths)) emittedAny = true;
+            if (emittedAny) return;
         }
         var c = [0.5, 0.5, 0.5];
         try {
@@ -2273,6 +2888,70 @@
             if (found) c = found;
         } catch (e) {}
         writeBoundsGeo(arr, ind, nfo, c);
+    }
+
+    // Stroke-only paths → USD BasisCurves (open or closed polylines).  Width
+    // comes from the AE Vector Stroke "Stroke Width" (AE px → USD units via
+    // /scale).  First stroke colour wins for the prim's displayColor; per-
+    // path colour would need separate sub-prims.  Anchor-shifts the points
+    // like the Mesh writers, so AE rotation/scale pivots line up.
+    function writeStrokeCurves(arr, ind, nfo, paths) {
+        var anchor = [0, 0, 0];
+        try { anchor = nfo.layer.anchorPoint.value; } catch (e) {}
+
+        var allPts = [], curveCounts = [];
+        var displayColor = [0.5, 0.5, 0.5], foundColor = false;
+        var widthPx = 2;
+
+        for (var pi = 0; pi < paths.length; pi++) {
+            var p = paths[pi];
+            if (!p.poly) continue;
+            var poly = dedupAdjacent(p.poly);
+            var minPts = (p.closed === false) ? 2 : 3;
+            if (poly.length < minPts) continue;
+
+            // Closed strokes need their first point repeated at the end so
+            // the polyline visually closes (BasisCurves type=linear is open).
+            var closed = (p.closed !== false);
+            var n = poly.length + (closed ? 1 : 0);
+            for (var v = 0; v < poly.length; v++) {
+                var ux = (poly[v][0] - anchor[0]) / scale;
+                var uy = -(poly[v][1] - anchor[1]) / scale;
+                allPts.push('(' + fmt(ux) + ', ' + fmt(uy) + ', 0)');
+            }
+            if (closed) {
+                var ux0 = (poly[0][0] - anchor[0]) / scale;
+                var uy0 = -(poly[0][1] - anchor[1]) / scale;
+                allPts.push('(' + fmt(ux0) + ', ' + fmt(uy0) + ', 0)');
+            }
+            curveCounts.push(n);
+
+            if (!foundColor && p.strokeColor) {
+                displayColor = [p.strokeColor[0], p.strokeColor[1], p.strokeColor[2]];
+                foundColor = true;
+            }
+            if (typeof p.strokeWidth === "number") widthPx = p.strokeWidth;
+        }
+
+        if (!allPts.length) return false;
+        var widthUnits = widthPx / scale;
+
+        var ind2 = ind + I1;
+        var ind3 = ind2 + I1;
+        arr.push(ind + 'def BasisCurves "stroke"');
+        arr.push(ind + '{');
+        arr.push(ind2 + 'uniform token type = "linear"');
+        arr.push(ind2 + 'int[] curveVertexCounts = [' + curveCounts.join(', ') + ']');
+        arr.push(ind2 + 'point3f[] points = [' + allPts.join(', ') + ']');
+        var widths = [];
+        for (var w = 0; w < allPts.length; w++) widths.push(fmt(widthUnits));
+        arr.push(ind2 + 'float[] widths = [' + widths.join(', ') + '] (');
+        arr.push(ind3 + 'interpolation = "vertex"');
+        arr.push(ind2 + ')');
+        arr.push(ind2 + 'color3f[] primvars:displayColor = [(' +
+            fmt(displayColor[0]) + ', ' + fmt(displayColor[1]) + ', ' + fmt(displayColor[2]) + ')]');
+        arr.push(ind + '}');
+        return true;
     }
 
     function findFirstFill(prop) {

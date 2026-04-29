@@ -30,7 +30,7 @@ rotation: (rx, -ry, -rz)
 | Solid                       | `Xform` + `Mesh` (flat quad, `primvars:displayColor` = solid colour)               |
 | Footage (image / video)     | `Xform` + `Mesh` + `Material` (`UsdPreviewSurface` + `UsdUVTexture` + `UsdPrimvarReader_float2`) |
 | Text layer                  | `Xform` + `Mesh` (triangulated glyph outlines via `Create Shapes from Text`; animated text emits per-frame timeSampled points) |
-| Shape layer                 | `Xform` + `Mesh` (triangulated outlines for every Path / Rect / Ellipse / Star, fill colour from first `ADBE Vector Graphic - Fill`) |
+| Shape layer                 | `Xform` + `Mesh` (triangulated outlines for every filled Path / Rect / Ellipse / Star, fill colour from first `ADBE Vector Graphic - Fill`); stroke-only paths produce a sibling `BasisCurves "stroke"`.  Star roundness + animated path keys preserved. |
 | Animated layer (per-type)   | optional sibling `BasisCurves "<primName>_path"` under `AE_Scene` — yellow for cameras, orange for lights, cyan for nulls, green for AV layers — showing the per-frame world-space trajectory.  Toggled per type via dialog checkboxes; skipped when the path is static. |
 
 AE parent/child relationships are preserved as nested USD prims. AE's local position/rotation/scale composes correctly through the nesting.
@@ -52,7 +52,10 @@ Text and shape geometry is **real triangulated mesh** built by walking each laye
    - **Film width** — sensor / film-back width in mm (default 36 = full-frame; APS-C ≈ 24, S35 ≈ 25). AE's filmSize isn't scriptable, so the dialog is the override path.
    - **Frames** — Current / Work area / Full comp
    - **Visible only** — when on, only layers with the eyeball enabled (and inside any active solo set) are exported
-   - **Animation paths** — per-type toggles (Cameras / Lights / Nulls / AV layers) for the sibling `BasisCurves` trajectories.  All default off; opt-in per type.  Static paths are skipped automatically.
+   - **Text & Shape geometry**:
+     - *Bounding box (faster)* — emit a 4-vertex quad instead of triangulated outlines.  Useful for quick layout previews, much smaller files.
+     - *Animate text* / *Animate shapes* — per-frame samples when on, single start-frame snapshot when off.  Layer position / rotation / scale always animates either way; these only affect glyph / path geometry animation.
+   - **Animation paths** — per-type toggles (Cameras / Lights / Nulls / Other 3D layers) for the sibling `BasisCurves` trajectories.  All default off; opt-in per type.  Static paths are skipped automatically.
    - **Reset** — restore default values
 3. Pick a save path. Defaults to `<compname>.usda` in the project folder.
 4. After write, a confirmation dialog offers **Reveal in Finder** and **Open .usda**.
@@ -90,11 +93,11 @@ Matches AE's render-time visibility:
 
 ## Known limitations
 
-- Text and shape geometry is **triangulated outline only** — gradients, strokes, multi-fill effects, drop-shadows etc. are not represented.  Polygons-with-holes (letter "O") render filled (no hole subtraction in v1).  Trim Paths, Merge Paths, Repeater, Wiggle Paths and other shape operators are skipped silently — the layer falls back to a bounding-box quad if no extractable paths are found.  Star primitive is rendered with sharp points (roundness ignored).
+- Text and shape geometry is **triangulated outline only** for fills, plus a sibling **`BasisCurves`** for stroke-only paths.  Gradients, multi-fill effects, drop-shadows etc. are not represented.  Polygons-with-holes (letter "O") render filled (no hole subtraction in v1).  Trim Paths, Merge Paths, Repeater, Wiggle Paths and other shape operators are skipped silently — the layer falls back to a bounding-box quad if no extractable paths are found.
 - Layers parented to a non-exported (2D) layer become roots with a parent-relative transform — world position will be wrong. The 2D-layer preflight catches this when the parent is in the same comp.
 - Camera **film width** isn't reachable from ExtendScript, so the dialog asks for it (default 36 mm).  If your AE comp uses APS-C / S35 / etc., set the value before exporting.
 - Lights export the AE light type and intensity/colour/cone params but haven't been visually verified across all four light types in Houdini/Karma.
-- **Animated shape geometry** (path keyframes, animated Vector Group transforms) is sampled once at the export start frame; only **text** gets the per-frame extraction pass.  Layer-level transform animation still applies on top regardless.
+- **Animated shape geometry** (path keyframes, animated Vector Group transforms) is detected via a recursive walk of the layer's contents and emits per-frame timeSampled mesh data, matching the text path.
 - **Animated text** runs `Create Shapes from Text` once per frame to capture per-frame glyph state.  This is slow on long ranges with many text layers (≈ 100 ms per frame per layer) and increases USD file size proportionally — only triggered when the layer actually has sourceText keys / animators / expression.
 
 ## Cross-references

@@ -179,18 +179,20 @@ Done since first release (kept here so future sessions don't re-litigate solved 
 - ✅ **Negative / non-uniform scale on AVLayers** — switched matrix baking from column-scaling (`R[i][j] * s_j`) to row-scaling (`R[i][j] * s_i`), matching the row-vector form derivation.
 - ✅ **Layer time-stretch / time-remap** — handled transparently by AE's `valueAtTime`, no special-case needed.  Comp-time samples produce correct per-frame transforms regardless of the layer's stretch/remap.
 - ✅ **Animation paths (per-type checkboxes)** — emitted as sibling `BasisCurves` prims under AE_Scene (`<primName>_path`).  Dialog has four checkboxes (Cameras, Lights, Nulls, AV layers); all default off, user opts in per type.  Per-frame world-space samples come from a `toWorld([0,0,0])` probe-null so parented + animated layers also produce correct trajectories.  Static paths are skipped.  `displayColor` per type — cam = yellow, light = orange, null = cyan, AVLayer = green.
+- ✅ **Animated shape geometry** — `isShapeAnimated` recursively walks `Contents` looking for keyframed / expression-driven properties; if any, the pre-extract loop samples paths per frame via `extractShapePaths(layer, t)` (no destructive ops needed) and `writeShapeGeo` routes through `writeAnimatedVectorMesh`.
+- ✅ **Stroke-only paths** — when a Vector Group has Stroke without Fill, paths land in a sibling `def BasisCurves "stroke"` instead of being triangulated.  Stroke colour goes to `displayColor`, Stroke Width to USD `widths` (per-vertex, in scene units).  Fill+stroke layers still render as filled Mesh; the stroke is treated as decoration.
+- ✅ **Star primitive roundness** — Outer / Inner Roundness read from the Star property (Adobe matchName has the long-standing "Roundess" typo; we try the typo first, then the corrected spelling).  Tangent length scales with `roundness/100 × half-edge × 0.5523`, cubic-arcing the corners.  Visually matches AE; not bit-exact (Adobe doesn't publish the algorithm).
 
 Still pending:
 
 - **Light visual verification in Houdini/Karma.** All four types export data; per-type intensity tuning (Sphere × 1.0, Distant × 0.05, Dome × 0.01, plus `inputs:normalize = 1` and `radius = 0.1` for SphereLight) is the current convention. Needs a render-comparison sweep: AE preview vs Houdini render, all four types.
 - **X/Y/Z Rotation order (`Mi`) is `Z*Y*X`, untested.** All test cameras have zero individual X/Y/Z Rotations. If a `~2°` drift appears on cameras/nulls with non-zero values, suspect this Euler order next and run the probe trick.
-- **Vector geometry edge cases.**  Currently skipped: Stroke (no fill), Trim Paths, Merge Paths, Repeater, Wiggle Paths, Pucker & Bloat, Twist.  Star roundness is not approximated (sharp points only).  Hole subtraction (letter "O") not implemented — outer + inner outlines both render filled.  All graceful — fall back to bbox quad when no paths could be extracted.
-- **Animated shape geometry.**  Shape layers are sampled once at `startFrame`; only text gets the per-frame extraction loop.  Layer-level transform animation still applies regardless.
+- **Vector geometry edge cases still pending.**  Currently skipped: Trim Paths, Merge Paths, Repeater, Wiggle Paths, Pucker & Bloat, Twist.  Hole subtraction (letter "O") not implemented — outer + inner outlines both render filled.  All graceful — fall back to bbox quad when no paths could be extracted.
 
 ### How to resume a session
 
 1. Re-read this section first; tick off anything the user has confirmed since.
 2. For the README: read current `README.md`, apply the diff sketched above. Keep existing tone (early-release warning, coordinate-convention block, terse install/usage).
 3. For functional gaps: run the probe-null trick before guessing math fixes.
-4. Bump `BUILD_DATE` at the top of `GegenschussAeUsdExporter.jsx` for each meaningful change (after `260429ae` continue alphabetically: `260429af`, `ag`, …, or roll the date).
+4. Bump `BUILD_DATE` at the top of `GegenschussAeUsdExporter.jsx` for each meaningful change (after `260429ah` continue alphabetically: `260429ai`, `aj`, …, or roll the date).
 5. **Never auto-commit.** Make the edit, save, tell the user briefly what changed, wait for `ship`.
